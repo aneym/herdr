@@ -414,7 +414,7 @@ fn restored_ui_prefs(snapshot: &crate::persist::SessionSnapshot) -> crate::persi
         tree_collapsed_spaces: snapshot.tree_collapsed_spaces.clone(),
         tree_collapsed_tabs: snapshot.tree_collapsed_tabs.clone(),
         tree_pinned_spaces: snapshot.tree_pinned_spaces.clone(),
-        desks: snapshot.desks.clone(),
+        docs: snapshot.desks.clone(),
         pinned_tabs: snapshot.pinned_tabs.clone(),
         pin_sections: snapshot.pin_sections.clone(),
         tree_show_hidden_spaces: snapshot.tree_show_hidden_spaces,
@@ -623,8 +623,8 @@ impl App {
         state.tree_collapsed_spaces = ui_prefs.tree_collapsed_spaces.clone();
         state.tree_collapsed_tabs = ui_prefs.tree_collapsed_tabs.clone();
         state.tree_pinned_spaces = ui_prefs.tree_pinned_spaces.clone();
-        state.desks = ui_prefs.desks.clone();
-        state.prune_desks();
+        state.docs = ui_prefs.docs.clone();
+        state.prune_docs();
         state.pinned_tabs = ui_prefs.pinned_tabs.clone();
         state.pin_sections = ui_prefs.pin_sections.clone();
         state.prune_pinned_tabs();
@@ -814,8 +814,8 @@ impl App {
         // Pins are a shared session fact; a live handoff carries them in the
         // snapshot, and the replacement must keep them (the handoff policy
         // skips the session restore that applies them on a cold start).
-        app.state.desks = snapshot.desks.clone();
-        app.state.prune_desks();
+        app.state.docs = snapshot.desks.clone();
+        app.state.prune_docs();
         app.state.pinned_tabs = snapshot.pinned_tabs.clone();
         app.state.pin_sections = snapshot.pin_sections.clone();
         app.state.prune_pinned_tabs();
@@ -1242,11 +1242,11 @@ mod tests {
         assert_eq!(app.state.session_name.as_deref(), Some("work"));
     }
 
-    /// A dragged pin order and desk survive real snapshot serialization,
-    /// cold restore and live handoff; closed-tab desks are pruned.
+    /// A dragged pin order and doc survive real snapshot serialization,
+    /// cold restore and live handoff; closed-tab docs are pruned.
     #[cfg(unix)]
     #[tokio::test]
-    async fn desk_and_moved_pin_order_survive_session_restore_and_live_handoff() {
+    async fn doc_and_moved_pin_order_survive_session_restore_and_live_handoff() {
         let _guard = config_env_lock().lock().unwrap();
         let config_home = unique_temp_path("pin-order-config");
         let original_config_home = std::env::var_os("XDG_CONFIG_HOME");
@@ -1293,13 +1293,6 @@ mod tests {
             .set_tab_role(&tabs[2], Some(crate::api::schema::TabRole::Agent));
         app.handle_api_request(
             serde_json::from_value(serde_json::json!({
-                "id": "desk", "method": "desk.open",
-                "params": { "tab_id": tabs[0], "ref": "https://example.com/restore" }
-            }))
-            .unwrap(),
-        );
-        app.handle_api_request(
-            serde_json::from_value(serde_json::json!({
                 "id": "doc", "method": "tab.doc_set",
                 "params": { "tab_id": tabs[1], "url": "https://example.com/review", "title": "Review" }
             }))
@@ -1319,21 +1312,20 @@ mod tests {
                 .unwrap(),
             );
         }
-        let expected_doc = app.state.desks[&tabs[1]].clone();
+        let expected_doc = app.state.docs[&tabs[1]].clone();
         assert_eq!(expected_doc.doc.as_ref().unwrap().title, "Review");
-        let expected_desk = app.state.desks[&tabs[0]].clone();
-        // A closed tab loses its desk immediately. Even an older snapshot's
+        // A closed tab loses its doc immediately. Even an older snapshot's
         // entry for that tab must be pruned by both restore paths.
         app.state.workspaces[0].test_add_tab(Some("closed"));
         let closed_tab = app.public_tab_id(0, 2).unwrap();
         app.handle_api_request(
             serde_json::from_value(serde_json::json!({
-                "id": "closed-desk", "method": "desk.open",
-                "params": { "tab_id": closed_tab, "ref": "https://example.com/closed" }
+                "id": "closed-doc", "method": "tab.doc_set",
+                "params": { "tab_id": closed_tab, "url": "https://example.com/closed" }
             }))
             .unwrap(),
         );
-        let closed_desk = app.state.desks[&closed_tab].clone();
+        let closed_doc = app.state.docs[&closed_tab].clone();
         app.handle_api_request(
             serde_json::from_value(serde_json::json!({
                 "id": "close-tab", "method": "tab.close",
@@ -1341,8 +1333,8 @@ mod tests {
             }))
             .unwrap(),
         );
-        assert!(!app.state.desks.contains_key(&closed_tab));
-        app.state.desks.insert(closed_tab.clone(), closed_desk);
+        assert!(!app.state.docs.contains_key(&closed_tab));
+        app.state.docs.insert(closed_tab.clone(), closed_doc);
         let expected = vec![tabs[2].clone(), tabs[1].clone(), tabs[0].clone()];
         let order = |app: &App| -> Vec<String> {
             app.state
@@ -1364,7 +1356,11 @@ mod tests {
         );
         let session = crate::session::data_dir().join("session.json");
         std::fs::create_dir_all(session.parent().unwrap()).unwrap();
-        std::fs::write(&session, serde_json::to_string(&snapshot).unwrap()).unwrap();
+        let mut session_json = serde_json::to_value(&snapshot).unwrap();
+        assert_eq!(session_json["desks"][&tabs[1]]["doc"]["title"], "Review");
+        session_json["desks"][&tabs[1]]["items"] = serde_json::json!([]);
+        session_json["desks"][&tabs[0]] = serde_json::json!({ "items": [], "next_id": 2 });
+        std::fs::write(&session, serde_json::to_string(&session_json).unwrap()).unwrap();
 
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut restored = App::new(
@@ -1383,9 +1379,9 @@ mod tests {
             restored.state.pinned_tabs[2].section.as_deref(),
             Some("Later")
         );
-        assert_eq!(restored.state.desks[&tabs[0]], expected_desk);
-        assert_eq!(restored.state.desks[&tabs[1]], expected_doc);
-        assert!(!restored.state.desks.contains_key(&closed_tab));
+        assert_eq!(restored.state.docs[&tabs[1]], expected_doc);
+        assert!(!restored.state.docs.contains_key(&tabs[0]));
+        assert!(!restored.state.docs.contains_key(&closed_tab));
         assert_eq!(
             restored.state.pinned_tabs[0].role,
             Some(crate::api::schema::TabRole::Agent)
@@ -1407,9 +1403,8 @@ mod tests {
             handed_off.state.pinned_tabs[2].section.as_deref(),
             Some("Later")
         );
-        assert_eq!(handed_off.state.desks[&tabs[0]], expected_desk);
-        assert_eq!(handed_off.state.desks[&tabs[1]], expected_doc);
-        assert!(!handed_off.state.desks.contains_key(&closed_tab));
+        assert_eq!(handed_off.state.docs[&tabs[1]], expected_doc);
+        assert!(!handed_off.state.docs.contains_key(&closed_tab));
         assert_eq!(
             handed_off.state.pinned_tabs[0].role,
             Some(crate::api::schema::TabRole::Agent)

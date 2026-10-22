@@ -69,7 +69,7 @@ pub struct SessionSnapshot {
     #[serde(default)]
     pub tree_pinned_spaces: std::collections::HashSet<String>,
     #[serde(default)]
-    pub desks: std::collections::HashMap<String, crate::app::state::DeskState>,
+    pub desks: std::collections::HashMap<String, crate::app::state::TabDocState>,
     #[serde(default)]
     pub pinned_tabs: Vec<crate::app::state::PinnedTab>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -406,7 +406,7 @@ struct RawSessionSnapshot {
     #[serde(default)]
     tree_pinned_spaces: std::collections::HashSet<String>,
     #[serde(default)]
-    desks: std::collections::HashMap<String, crate::app::state::DeskState>,
+    desks: std::collections::HashMap<String, crate::app::state::TabDocState>,
     #[serde(default)]
     pinned_tabs: Vec<crate::app::state::PinnedTab>,
     #[serde(default)]
@@ -520,7 +520,7 @@ pub struct UiPrefs {
     pub tree_collapsed_spaces: std::collections::HashSet<String>,
     pub tree_collapsed_tabs: std::collections::HashSet<String>,
     pub tree_pinned_spaces: std::collections::HashSet<String>,
-    pub desks: std::collections::HashMap<String, crate::app::state::DeskState>,
+    pub docs: std::collections::HashMap<String, crate::app::state::TabDocState>,
     pub pinned_tabs: Vec<crate::app::state::PinnedTab>,
     pub pin_sections: Vec<String>,
     pub tree_show_hidden_spaces: bool,
@@ -539,7 +539,7 @@ impl Default for UiPrefs {
             tree_collapsed_spaces: Default::default(),
             tree_collapsed_tabs: Default::default(),
             tree_pinned_spaces: Default::default(),
-            desks: Default::default(),
+            docs: Default::default(),
             pinned_tabs: Vec::new(),
             pin_sections: Vec::new(),
             tree_show_hidden_spaces: false,
@@ -584,7 +584,7 @@ pub fn capture(
         tree_collapsed_spaces: ui.tree_collapsed_spaces,
         tree_collapsed_tabs: ui.tree_collapsed_tabs,
         tree_pinned_spaces: ui.tree_pinned_spaces,
-        desks: ui.desks,
+        desks: ui.docs,
         pinned_tabs: ui.pinned_tabs,
         pin_sections: ui.pin_sections,
         tree_show_hidden_spaces: ui.tree_show_hidden_spaces,

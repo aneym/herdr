@@ -182,7 +182,7 @@ final class QuickSwitchController: ObservableObject {
         isOpen = false
         selectAll = false
         host?.isHidden = true
-        owner?.selectTab(id, revealDocs: reveal)
+        owner?.selectTab(id, stepping: reveal)
     }
 
     func commit() { pick(cursor + 1) }

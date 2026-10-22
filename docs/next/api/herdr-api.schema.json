@@ -85,96 +85,8 @@
           ],
           "type": "string"
         },
-        "DeskInfo": {
-          "properties": {
-            "front": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "items": {
-              "items": {
-                "$ref": "#/schemas/event/$defs/DeskItem"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "items"
-          ],
-          "type": "object"
-        },
-        "DeskItem": {
-          "properties": {
-            "id": {
-              "type": "string"
-            },
-            "kind": {
-              "$ref": "#/schemas/event/$defs/DeskItemKind"
-            },
-            "mime": {
-              "type": "string"
-            },
-            "opened_at_ms": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "opened_by": {
-              "type": "string"
-            },
-            "ref": {
-              "type": "string"
-            },
-            "title": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "id",
-            "kind",
-            "ref",
-            "title",
-            "mime",
-            "opened_by",
-            "opened_at_ms"
-          ],
-          "type": "object"
-        },
-        "DeskItemKind": {
-          "enum": [
-            "url",
-            "file"
-          ],
-          "type": "string"
-        },
         "EventData": {
           "oneOf": [
-            {
-              "properties": {
-                "desk": {
-                  "$ref": "#/schemas/event/$defs/DeskInfo"
-                },
-                "tab_id": {
-                  "type": "string"
-                },
-                "type": {
-                  "const": "desk_changed",
-                  "type": "string"
-                },
-                "workspace_id": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "workspace_id",
-                "tab_id",
-                "desk"
-              ],
-              "type": "object"
-            },
             {
               "properties": {
                 "type": {
@@ -856,7 +768,6 @@
         },
         "EventKind": {
           "enum": [
-            "desk.changed",
             "workspace_created",
             "workspace_updated",
             "workspace_metadata_updated",
@@ -1214,16 +1125,6 @@
             "custom_label": {
               "description": "The label was set by a rename rather than derived from the panes. Areas mode lets it win\nover areas.json and lanes.json names. Absent on servers that predate it.",
               "type": "boolean"
-            },
-            "desk": {
-              "anyOf": [
-                {
-                  "$ref": "#/schemas/event/$defs/DeskInfo"
-                },
-                {
-                  "type": "null"
-                }
-              ]
             },
             "doc": {
               "anyOf": [
@@ -2237,139 +2138,6 @@
           "required": [
             "command_id"
           ],
-          "type": "object"
-        },
-        "DeskCloseParams": {
-          "properties": {
-            "item": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "pane_id": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "tab_id": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          "type": "object"
-        },
-        "DeskFocusParams": {
-          "properties": {
-            "item": {
-              "type": "string"
-            },
-            "pane_id": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "tab_id": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          "required": [
-            "item"
-          ],
-          "type": "object"
-        },
-        "DeskOpenParams": {
-          "properties": {
-            "background": {
-              "default": false,
-              "type": "boolean"
-            },
-            "opened_by": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "pane_id": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "ref": {
-              "type": "string"
-            },
-            "tab_id": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "title": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          "required": [
-            "ref"
-          ],
-          "type": "object"
-        },
-        "DeskReadParams": {
-          "properties": {
-            "item": {
-              "type": "string"
-            },
-            "known_mtime_ms": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
-            "pane_id": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "tab_id": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          "required": [
-            "item"
-          ],
-          "type": "object"
-        },
-        "DeskTarget": {
-          "properties": {
-            "pane_id": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "tab_id": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
           "type": "object"
         },
         "EmptyParams": {
@@ -4188,6 +3956,12 @@
             },
             "name": {
               "type": "string"
+            },
+            "source": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
@@ -4203,6 +3977,12 @@
             },
             "new_name": {
               "type": "string"
+            },
+            "source": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
@@ -4215,6 +3995,12 @@
           "properties": {
             "name": {
               "type": "string"
+            },
+            "source": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
@@ -4754,18 +4540,6 @@
             {
               "properties": {
                 "type": {
-                  "const": "desk.changed",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type"
-              ],
-              "type": "object"
-            },
-            {
-              "properties": {
-                "type": {
                   "const": "workspace.created",
                   "type": "string"
                 }
@@ -5211,6 +4985,23 @@
           ],
           "type": "object"
         },
+        "TabDocTarget": {
+          "properties": {
+            "pane_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tab_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        },
         "TabListParams": {
           "properties": {
             "workspace_id": {
@@ -5246,6 +5037,12 @@
               "format": "uint",
               "minimum": 0,
               "type": "integer"
+            },
+            "source": {
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "tab_id": {
               "type": "string"
@@ -5302,6 +5099,12 @@
                 "null"
               ]
             },
+            "source": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "tab_id": {
               "type": "string"
             }
@@ -5325,6 +5128,12 @@
               ]
             },
             "section": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source": {
               "type": [
                 "string",
                 "null"
@@ -5758,86 +5567,6 @@
         {
           "properties": {
             "method": {
-              "const": "desk.open",
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/schemas/request/$defs/DeskOpenParams"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "const": "desk.close",
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/schemas/request/$defs/DeskCloseParams"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "const": "desk.focus",
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/schemas/request/$defs/DeskFocusParams"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "const": "desk.list",
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/schemas/request/$defs/DeskTarget"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "const": "desk.read",
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/schemas/request/$defs/DeskReadParams"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
               "const": "tab.doc_set",
               "type": "string"
             },
@@ -5858,7 +5587,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/schemas/request/$defs/DeskTarget"
+              "$ref": "#/schemas/request/$defs/TabDocTarget"
             }
           },
           "required": [
@@ -5874,7 +5603,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/schemas/request/$defs/DeskTarget"
+              "$ref": "#/schemas/request/$defs/TabDocTarget"
             }
           },
           "required": [
@@ -8685,96 +8414,8 @@
           ],
           "type": "string"
         },
-        "DeskInfo": {
-          "properties": {
-            "front": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "items": {
-              "items": {
-                "$ref": "#/schemas/success_response/$defs/DeskItem"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "items"
-          ],
-          "type": "object"
-        },
-        "DeskItem": {
-          "properties": {
-            "id": {
-              "type": "string"
-            },
-            "kind": {
-              "$ref": "#/schemas/success_response/$defs/DeskItemKind"
-            },
-            "mime": {
-              "type": "string"
-            },
-            "opened_at_ms": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "opened_by": {
-              "type": "string"
-            },
-            "ref": {
-              "type": "string"
-            },
-            "title": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "id",
-            "kind",
-            "ref",
-            "title",
-            "mime",
-            "opened_by",
-            "opened_at_ms"
-          ],
-          "type": "object"
-        },
-        "DeskItemKind": {
-          "enum": [
-            "url",
-            "file"
-          ],
-          "type": "string"
-        },
         "EventData": {
           "oneOf": [
-            {
-              "properties": {
-                "desk": {
-                  "$ref": "#/schemas/success_response/$defs/DeskInfo"
-                },
-                "tab_id": {
-                  "type": "string"
-                },
-                "type": {
-                  "const": "desk_changed",
-                  "type": "string"
-                },
-                "workspace_id": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "workspace_id",
-                "tab_id",
-                "desk"
-              ],
-              "type": "object"
-            },
             {
               "properties": {
                 "type": {
@@ -9471,7 +9112,6 @@
         },
         "EventKind": {
           "enum": [
-            "desk.changed",
             "workspace_created",
             "workspace_updated",
             "workspace_metadata_updated",
@@ -11594,45 +11234,6 @@
           "oneOf": [
             {
               "properties": {
-                "desk": {
-                  "$ref": "#/schemas/success_response/$defs/TabDesk"
-                },
-                "item_id": {
-                  "type": "string"
-                },
-                "type": {
-                  "const": "desk",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "desk",
-                "item_id"
-              ],
-              "type": "object"
-            },
-            {
-              "properties": {
-                "desks": {
-                  "items": {
-                    "$ref": "#/schemas/success_response/$defs/TabDesk"
-                  },
-                  "type": "array"
-                },
-                "type": {
-                  "const": "desk_list",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "desks"
-              ],
-              "type": "object"
-            },
-            {
-              "properties": {
                 "sections": {
                   "items": {
                     "$ref": "#/schemas/success_response/$defs/PinSectionInfo"
@@ -11684,48 +11285,6 @@
                 "type",
                 "tab_id",
                 "workspace_id"
-              ],
-              "type": "object"
-            },
-            {
-              "properties": {
-                "data_base64": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "item_id": {
-                  "type": "string"
-                },
-                "mime": {
-                  "type": "string"
-                },
-                "mtime_ms": {
-                  "format": "uint64",
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "size": {
-                  "format": "uint64",
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "type": {
-                  "const": "desk_file",
-                  "type": "string"
-                },
-                "unchanged": {
-                  "type": "boolean"
-                }
-              },
-              "required": [
-                "type",
-                "item_id",
-                "mime",
-                "size",
-                "mtime_ms",
-                "unchanged"
               ],
               "type": "object"
             },
@@ -13370,34 +12929,6 @@
           ],
           "type": "string"
         },
-        "TabDesk": {
-          "properties": {
-            "front": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "items": {
-              "items": {
-                "$ref": "#/schemas/success_response/$defs/DeskItem"
-              },
-              "type": "array"
-            },
-            "tab_id": {
-              "type": "string"
-            },
-            "workspace_id": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "tab_id",
-            "workspace_id",
-            "items"
-          ],
-          "type": "object"
-        },
         "TabDoc": {
           "properties": {
             "set_at_ms": {
@@ -13433,16 +12964,6 @@
             "custom_label": {
               "description": "The label was set by a rename rather than derived from the panes. Areas mode lets it win\nover areas.json and lanes.json names. Absent on servers that predate it.",
               "type": "boolean"
-            },
-            "desk": {
-              "anyOf": [
-                {
-                  "$ref": "#/schemas/success_response/$defs/DeskInfo"
-                },
-                {
-                  "type": "null"
-                }
-              ]
             },
             "doc": {
               "anyOf": [

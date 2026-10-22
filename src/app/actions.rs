@@ -925,7 +925,7 @@ impl AppState {
         for idx in close_indices.iter().rev() {
             self.workspaces.remove(*idx);
         }
-        self.prune_desks();
+        self.prune_docs();
         self.remove_unattached_terminal_ids(terminal_ids);
         if self.workspaces.is_empty() {
             self.active = None;
@@ -1348,7 +1348,7 @@ impl AppState {
             let closing_tab_id =
                 public_tab_id_for_index(ws, ws.active_tab).unwrap_or_else(|| workspace_id.clone());
             ws.close_active_tab();
-            self.prune_desks();
+            self.prune_docs();
             self.remove_plugin_pane_records(pane_ids);
             self.remove_unattached_terminal_ids(terminal_ids);
             crate::logging::tab_closed(&workspace_id, &closing_tab_id);
@@ -2375,7 +2375,7 @@ impl AppState {
             ws.remove_pane(pane_id)
         };
         self.prune_pinned_tabs();
-        self.prune_desks();
+        self.prune_docs();
         self.mark_session_dirty();
 
         if should_close_workspace {
@@ -2386,7 +2386,7 @@ impl AppState {
             let selected_workspace_id = self.workspaces.get(self.selected).map(|ws| ws.id.clone());
             self.workspaces.remove(ws_idx);
             self.prune_pinned_tabs();
-            self.prune_desks();
+            self.prune_docs();
             self.remove_unattached_terminal_ids(workspace_terminal_ids);
             if self.workspaces.is_empty() {
                 self.active = None;
@@ -5155,21 +5155,21 @@ mod tests {
         state.assert_invariants_for_test();
     }
 
-    // Reviewer regression: exercise the real workspace/action/desk lifecycle together.
     #[test]
-    fn close_tab_prunes_desk() {
+    fn close_tab_prunes_doc() {
         let mut state = app_with_workspaces(&["test"]);
-        let tab_idx = state.workspaces[0].test_add_tab(Some("desk"));
+        let tab_idx = state.workspaces[0].test_add_tab(Some("doc"));
         state.workspaces[0].switch_tab(tab_idx);
         let tab_id = public_tab_id_for_index(&state.workspaces[0], tab_idx).unwrap();
         let kept_id = public_tab_id_for_index(&state.workspaces[0], 0).unwrap();
-        state.desks.insert(tab_id.clone(), Default::default());
-        state.desks.insert(kept_id.clone(), Default::default());
+        let doc = || serde_json::from_str(r#"{"doc":{"url":"u","title":"t"}}"#).unwrap();
+        state.docs.insert(tab_id.clone(), doc());
+        state.docs.insert(kept_id.clone(), doc());
 
         assert!(!state.close_tab());
 
-        assert!(!state.desks.contains_key(&tab_id));
-        assert!(state.desks.contains_key(&kept_id));
+        assert!(!state.docs.contains_key(&tab_id));
+        assert!(state.docs.contains_key(&kept_id));
         assert_eq!(state.workspaces[0].tabs.len(), 1);
         state.assert_invariants_for_test();
     }

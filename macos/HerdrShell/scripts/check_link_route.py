@@ -24,8 +24,8 @@ with tempfile.TemporaryDirectory(prefix="herdr-link-route-", dir=os.environ.get(
         rows = []
         failures += 1
     expected = [f"{scheme}|{shift}|{route}" for scheme, plain, shifted in
-                [("http", "desk", "external"), ("https", "desk", "external"),
-                 ("file", "desk", "external"), ("mailto", "external", "external"),
+                [("http", "aside", "external"), ("https", "aside", "external"),
+                 ("file", "aside", "external"), ("mailto", "external", "external"),
                  ("javascript", "ignore", "ignore"), ("ftp", "ignore", "ignore")]
                 for shift, route in [("false", plain), ("true", shifted)]]
     if rows:

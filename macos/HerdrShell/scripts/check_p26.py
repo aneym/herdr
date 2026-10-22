@@ -289,7 +289,6 @@ def main():
           rows and (rows[0]["park_note"] or "").endswith(" · factory paused for the postmortem; resume after Alex approves")
           and (rows[1]["park_note"] or "").startswith("Sep 30 · come back after the raise"),
           f"{[r['park_note'] for r in rows]}")
-    S.cmd({"cmd": "docs", "open": False})
     for mode in ("light", "dark"):
         S.cmd({"cmd": "appearance", "mode": mode})
         time.sleep(0.6)

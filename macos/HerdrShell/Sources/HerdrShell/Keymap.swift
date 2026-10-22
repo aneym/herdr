@@ -182,9 +182,6 @@ extension MainWindowController {
             if state.mode == .areas { focusStep(-1) } else { prevPane(nil) }
         case "toggle_area_mode":
             state.setMode(state.mode == .areas ? .spaces : .areas)
-        case "toggle_docs":
-            forcedEmptyDocs = !state.docOpen
-            setDocs(open: !state.docOpen)
         case "filter_1": state.setChip(.all)
         case "filter_2": state.setChip(.needs)
         case "filter_3": state.setChip(.scoping)
@@ -195,13 +192,12 @@ extension MainWindowController {
         case "prev_tab": prevTab(nil)
         case "focus_pane_left": focusNeighbor(dx: -1, dy: 0)
         case "focus_pane_right": focusNeighbor(dx: 1, dy: 0)
-        case "focus_doc_address": docPanel.focusAddress()
         case "focus_pane_up": focusNeighbor(dx: 0, dy: -1)
         case "focus_pane_down": focusNeighbor(dx: 0, dy: 1)
         case "new_tab": newTab(nil)
         case "split_right": splitRight(nil)
         case "split_down": splitDown(nil)
-        case "close_pane": if docsOwnClose { closeDocs() } else { closePane() }
+        case "close_pane": closePane()
         case "move_pane_mode":
             if let pane = focusedSurface?.paneId ?? state.focusedPane { paneDrag.beginKeyboard(pane: pane) }
         case "zoom_pane": zoomPane()
@@ -213,7 +209,6 @@ extension MainWindowController {
         case "rename_tab": promptRenameTab(nil)
         case "close_detail":
             if quickSwitch.isOpen { quickSwitch.dismiss(); break }
-            if docPanel.hasFocus { docPanel.returnFocus(); break }
             closeDetail()
         case "close_switcher":
             quickSwitch.dismiss()
@@ -231,7 +226,7 @@ extension MainWindowController {
             if action.hasPrefix("goto_tab_"), let n = Int(action.dropFirst("goto_tab_".count)) {
                 if quickSwitch.isOpen { quickSwitch.pick(n); return true }
                 let rows = model.numberedTabIds(state: state)
-                if n >= 1, n <= rows.count { selectTab(rows[n - 1], revealDocs: state.mode == .areas) }
+                if n >= 1, n <= rows.count { selectTab(rows[n - 1], stepping: state.mode == .areas) }
                 return true
             }
             if action.hasPrefix("goto_space_"), let n = Int(action.dropFirst("goto_space_".count)) {

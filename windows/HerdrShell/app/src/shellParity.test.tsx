@@ -1,9 +1,8 @@
 // @vitest-environment happy-dom
-// Real React desk/sidebar and generated CSS; only native IPC is simulated.
+// Real React sidebar and generated CSS; only native IPC is simulated.
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
-import DocPanel from "./DocPanel";
 import Sidebar from "./Sidebar";
 import { readFileSync } from "node:fs";
 const styles = readFileSync("src/styles.css", "utf8");
@@ -20,28 +19,6 @@ function mount() {
   const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
   cleanups.push(() => act(() => root.unmount())); return { host, root };
 }
-it("shows the desk path and routes Open, add and close through their native/server boundaries", async () => {
-  const { host, root } = mount(); const close = vi.fn();
-  const file = { id: "d1", name: "Notes", kind: "file" as const, path: "/Studio/notes.md", mime: "text/markdown" };
-  const render = (item: typeof file | { name: string; kind: "web"; url: string }) => act(() => root.render(<DocPanel machine="studio" tab="t1" items={[item]} active={"id" in item ? item.id : item.name} select={() => {}} error="" close={close} />));
-  await render(file);
-  expect(host.querySelector(".docs-path")?.textContent).toBe("/Studio/notes.md");
-  const open = host.querySelector<HTMLButtonElement>('[aria-label="Open document externally"]')!;
-  expect(open.textContent).toBe("Open"); expect(open.disabled).toBe(true); expect(open.title).toBe("File is on Studio");
-  const add = host.querySelector<HTMLButtonElement>('[aria-label="Add document"]')!;
-  expect(add.textContent).toBe("+"); await act(async () => add.click());
-  const input = host.querySelector<HTMLInputElement>('[aria-label="Document address"]')!;
-  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "https://example.com/new"); input.dispatchEvent(new Event("input", { bubbles: true })); });
-  await act(async () => host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
-  expect(native.invoke).toHaveBeenCalledWith("api_request", { machine: "studio", method: "desk.open", params: { tab_id: "t1", ref: "https://example.com/new", opened_by: "user" } });
-  const cross = host.querySelector<HTMLButtonElement>('[aria-label="Close document"]')!;
-  expect(cross.textContent).toBe("✕"); await act(async () => cross.click());
-  expect(native.invoke).toHaveBeenCalledWith("api_request", { machine: "studio", method: "desk.close", params: { tab_id: "t1", item: "d1" } });
-  await render({ name: "Scope", kind: "web", url: "https://example.com/scope" });
-  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Open document externally"]')!.click());
-  expect(native.invoke).toHaveBeenCalledWith("open_url", { url: "https://example.com/scope" });
-  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Close document"]')!.click()); expect(close).toHaveBeenCalledOnce();
-});
 function sidebar() {
   const { host, root } = mount(); const noop = () => {};
   const rows = [

@@ -1,17 +1,14 @@
 #!/usr/bin/env python3
-"""Real terminal clicks preserve URL bytes and reopen a reused panel after navigation.
+"""Real terminal clicks preserve URL bytes on the way to Aside.
 
-The table guards query/fragment detection; the reuse case guards the desk reply /
-snapshot lifecycle that parser tests cannot reach. No production test seam is added.
+The table guards query/fragment detection. No production test seam is added.
 Run HERDR_SHELL_SPACE=1 python3 scripts/check_exact_url_space.py --out DIR.
 """
 import argparse
-import http.server
 import json
 import os
 import pathlib
 import shlex
-import threading
 import time
 
 if os.environ.get('HERDR_SHELL_SPACE') != '1':
@@ -58,27 +55,6 @@ def api(*args):
     return json.loads(S.lab('herdr', *args))['result']
 
 
-requests = []
-
-
-class RedirectPage(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        requests.append(self.path)
-        body = b'<meta http-equiv="refresh" content="0;url=/away">' if self.path.startswith('/start') else b'<h1>Navigation away</h1>'
-        self.send_response(200)
-        self.send_header('Content-Type', 'text/html')
-        self.end_headers()
-        self.wfile.write(body)
-
-    def log_message(self, *args):
-        pass
-
-
-server = http.server.ThreadingHTTPServer(('0.0.0.0', 0), RedirectPage)
-threading.Thread(target=server.serve_forever, daemon=True).start()
-reused = f'http://192.168.64.1:{server.server_port}/start?q=a%2Fb#fragment'
-CASES.append((reused, reused))
-
 try:
     S.lab('up')
     made = api('workspace', 'create', '--label', 'exact-url', '--no-focus')
@@ -92,7 +68,6 @@ try:
 
     wait(lambda s: surface(s).get('cols', 0) > 0)
     S.wait_read(pane, lambda text: '%' in text, timeout=10)
-    # Output stays fixed while the side panel changes the terminal width.
     command = "printf '\\033[2J\\033[H'; printf '%s\\n' " + ' '.join(shlex.quote(raw) for raw, _ in CASES) + '; sleep 3600'
     S.lab('herdr', 'pane', 'run', pane, command)
     wait(lambda s: any(line.startswith('https://app.rails.so/') for line in surface(s).get('visible_nonblank', [])))
@@ -118,29 +93,12 @@ try:
     for raw, url in CASES:
         state = click(raw)
         opened = state.get('opened_urls', [])
-        check('terminal opens exact target ' + url, bool(opened) and opened[-1] == 'desk ' + url, json.dumps(opened[-1:]))
-        desk = json.loads(S.lab('herdr', 'desk', 'list', '--tab', tab, '--json'))
-        check('desk retains exact target ' + url, any(i['ref'] == url for d in desk['desks'] for i in d['items']))
-        if url == EXACT:
-            time.sleep(5)
-            state = S.state()
-            lines.append('Rails panel URL readback: ' + state.get('docs', {}).get('url', ''))
-            S.cmd({'cmd': 'shot', 'out': str(out / 'rails-url.png')})
-
-    state = wait(lambda s: s.get('docs', {}).get('url', '').endswith('/away'))
-    check('page navigated existing panel away', state.get('docs', {}).get('url', '').endswith('/away'), state.get('docs', {}).get('url', ''))
-    before = requests.count('/start?q=a%2Fb')
-    click(reused)
-    wait(lambda s: requests.count('/start?q=a%2Fb') > before)
-    check('reopening existing item requests full URL again', requests.count('/start?q=a%2Fb') == before + 1, repr(requests))
-    S.cmd({'cmd': 'shot', 'out': str(out / 'reopened-url.png')})
+        check('terminal opens exact target in Aside ' + url, bool(opened) and opened[-1] == 'aside ' + url, json.dumps(opened[-1:]))
 except (Exception, SystemExit) as error:
     check('scenario completed', False, str(error))
 finally:
     S.app('stop')
     S.lab('down')
-    server.shutdown()
-    server.server_close()
     (out / 'check.txt').write_text('\n'.join(lines) + '\n')
 print(f'{len(failures)} failed', flush=True)
 raise SystemExit(bool(failures))

@@ -1,12 +1,12 @@
-use crate::api::schema::{DeskTarget, Method, Request, ResponseResult, TabDocSetParams};
+use crate::api::schema::{Method, Request, ResponseResult, TabDocSetParams, TabDocTarget};
 
 fn resolve_target(
     tab: Option<String>,
     pane: Option<String>,
     own_pane: Option<&str>,
-) -> Result<DeskTarget, String> {
+) -> Result<TabDocTarget, String> {
     if let Some(tab_id) = tab {
-        return Ok(DeskTarget {
+        return Ok(TabDocTarget {
             tab_id: Some(super::normalize_tab_id(&tab_id)),
             pane_id: None,
         });
@@ -15,10 +15,76 @@ fn resolve_target(
         .map(|id| super::normalize_pane_id(&id))
         .or_else(|| own_pane.map(str::to_owned))
         .ok_or("not in a herdr pane; pass a tab id or --tab")?;
-    Ok(DeskTarget {
+    Ok(TabDocTarget {
         tab_id: None,
         pane_id: Some(pane_id),
     })
+}
+
+fn classify_reference(reference: &str) -> Result<String, String> {
+    let scheme_and_rest = reference.split_once(':');
+    if let Some((scheme, rest)) = scheme_and_rest {
+        if (scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https"))
+            && rest.starts_with("//")
+        {
+            // The server expects lowercase schemes; preserve the rest of the URL exactly.
+            return Ok(format!("{}:{rest}", scheme.to_ascii_lowercase()));
+        }
+    }
+    let decoded;
+    let path = if let Some((_, rest)) = scheme_and_rest
+        .filter(|(scheme, rest)| scheme.eq_ignore_ascii_case("file") && rest.starts_with("//"))
+    {
+        let path = &rest[2..];
+        let path = if path
+            .get(..10)
+            .is_some_and(|host| host.eq_ignore_ascii_case("localhost/"))
+        {
+            &path[9..]
+        } else {
+            path
+        };
+        decoded = decode_file_path(path)?;
+        decoded.as_str()
+    } else {
+        if let Some((scheme, rest)) = scheme_and_rest {
+            let drive_path = scheme.len() == 1
+                && scheme.as_bytes()[0].is_ascii_alphabetic()
+                && rest.starts_with(['\\', '/']);
+            if !drive_path
+                && !scheme.is_empty()
+                && scheme.starts_with(|c: char| c.is_ascii_alphabetic())
+                && scheme
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+            {
+                return Err(format!("unsupported scheme: {scheme}"));
+            }
+        }
+        reference
+    };
+    std::fs::canonicalize(path)
+        .map(|path| path.to_string_lossy().into_owned())
+        .map_err(|_| format!("no such file: {path}"))
+}
+
+fn decode_file_path(path: &str) -> Result<String, String> {
+    let mut bytes = path.bytes();
+    let mut decoded = Vec::with_capacity(path.len());
+    while let Some(byte) = bytes.next() {
+        if byte == b'%' {
+            let hex = |byte: u8| (byte as char).to_digit(16).map(|digit| digit as u8);
+            let high = bytes.next().and_then(hex);
+            let low = bytes.next().and_then(hex);
+            let (Some(high), Some(low)) = (high, low) else {
+                return Err(format!("invalid file URL escape: {path}"));
+            };
+            decoded.push(high * 16 + low);
+        } else {
+            decoded.push(byte);
+        }
+    }
+    String::from_utf8(decoded).map_err(|_| format!("invalid UTF-8 file URL path: {path}"))
 }
 
 pub(super) fn build_method(
@@ -48,7 +114,7 @@ pub(super) fn build_method(
                 resolve_target(positional_tab.or(option("tab")), option("pane"), own_pane)?;
             Ok(Method::TabDocSet(TabDocSetParams {
                 target,
-                url: super::desk::classify_reference(raw.trim())?,
+                url: classify_reference(raw.trim())?,
                 title: option("title"),
                 set_by: Some(
                     own_pane
@@ -172,7 +238,7 @@ mod tests {
         assert_eq!(
             own.unwrap(),
             Method::TabDocSet(TabDocSetParams {
-                target: DeskTarget {
+                target: TabDocTarget {
                     tab_id: None,
                     pane_id: Some("w5H:p1".into())
                 },
@@ -195,14 +261,14 @@ mod tests {
 
         assert_eq!(
             method(&["get"], Some("w1:p2")).unwrap(),
-            Method::TabDocGet(DeskTarget {
+            Method::TabDocGet(TabDocTarget {
                 tab_id: None,
                 pane_id: Some("w1:p2".into())
             })
         );
         assert_eq!(
             method(&["clear", "w1:t3"], None).unwrap(),
-            Method::TabDocClear(DeskTarget {
+            Method::TabDocClear(TabDocTarget {
                 tab_id: Some("w1:t3".into()),
                 pane_id: None
             })
@@ -248,5 +314,80 @@ mod tests {
             doc: None,
         };
         assert_eq!(render(&none).unwrap(), "w1:t1 none");
+    }
+
+    #[test]
+    fn tab_doc_reference_filesystem_boundary() {
+        assert_eq!(
+            classify_reference("https://example.com").unwrap(),
+            "https://example.com"
+        );
+        assert_eq!(
+            classify_reference("http://example.com").unwrap(),
+            "http://example.com"
+        );
+        for (reference, expected) in [
+            ("HTTP://example.com/A", "http://example.com/A"),
+            ("Https://example.com/A", "https://example.com/A"),
+        ] {
+            assert_eq!(classify_reference(reference).unwrap(), expected);
+        }
+        // Drive paths must reach the filesystem, even on a non-Windows test host.
+        for reference in [
+            r"C:\docs\a.md",
+            "C:/docs/a.md",
+            r"z:\docs\a.md",
+            "z:/docs/a.md",
+        ] {
+            let expected = std::fs::canonicalize(reference)
+                .map(|path| path.to_string_lossy().into_owned())
+                .map_err(|_| format!("no such file: {reference}"));
+            assert_eq!(classify_reference(reference), expected);
+        }
+        let path = std::fs::canonicalize("Cargo.toml").unwrap();
+        assert_eq!(
+            classify_reference("Cargo.toml").unwrap(),
+            path.to_string_lossy()
+        );
+        assert_eq!(
+            classify_reference(&format!("file://{}", path.display())).unwrap(),
+            path.to_string_lossy()
+        );
+        for prefix in ["file://localhost", "FILE://LOCALHOST"] {
+            assert_eq!(
+                classify_reference(&format!("{prefix}{}", path.display())).unwrap(),
+                path.to_string_lossy()
+            );
+        }
+        let spaced =
+            std::env::temp_dir().join(format!("herdr tab doc reference {}.md", std::process::id()));
+        let _file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&spaced)
+            .unwrap();
+        let expected = std::fs::canonicalize(&spaced).unwrap();
+        let encoded = spaced.to_string_lossy().replace(' ', "%20");
+        for reference in [
+            format!("file://{encoded}"),
+            format!("file://localhost{encoded}"),
+        ] {
+            assert_eq!(
+                classify_reference(&reference).unwrap(),
+                expected.to_string_lossy()
+            );
+        }
+        drop(_file);
+        std::fs::remove_file(&spaced).unwrap();
+        for reference in ["file:///bad%", "file:///bad%GG", "file:///bad%FF"] {
+            assert!(classify_reference(reference)
+                .unwrap_err()
+                .starts_with("invalid"));
+        }
+        assert!(classify_reference("no-such-doc-file-123456789")
+            .unwrap_err()
+            .starts_with("no such file:"));
+        assert!(classify_reference("javascript:alert(1)").is_err());
+        assert!(classify_reference("ftp://example.com").is_err());
     }
 }

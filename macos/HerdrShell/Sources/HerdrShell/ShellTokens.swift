@@ -66,8 +66,6 @@ enum ShellSpace {
     static let chatItemGap: CGFloat = 18
     static let chatBlockGap: CGFloat = 12
     static let toolRow: CGFloat = 22
-    static let docWidth: CGFloat = 420
-    static let docMinWidth: CGFloat = 320
     static let switcherWidth: CGFloat = 560
     static let terminalPadX: CGFloat = 8
     static let terminalPadY: CGFloat = 6

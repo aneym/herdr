@@ -165,7 +165,7 @@ final class SurfaceView: NSView {
         return (Int(s.columns), Int(s.rows))
     }
 
-    // Only terminal surfaces accept Finder items; sidebar and desk drops stay unchanged.
+    // Only terminal surfaces accept Finder items; sidebar drops stay unchanged.
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         guard !exited, surface != nil,
               sender.draggingSourceOperationMask.contains(.copy),

@@ -85,17 +85,6 @@ footer { color: var(--shell-muted); padding: var(--shell-space-step12) var(--she
 
 .chat-surface { position: absolute; inset: 0; }.chat-hidden { visibility: hidden; pointer-events: none; }
 
-.docs { flex: 0 0 var(--shell-space-doc-width); min-width: var(--shell-space-doc-min-width); display: flex; flex-direction: column; background: var(--shell-surface); }
-.docs-tabs { display: flex; flex-shrink: 0; gap: var(--shell-space-step2); padding: var(--shell-space-step5) var(--shell-space-step8); overflow-x: auto; }
-.docs-tabs button { font-size: var(--shell-type-size12); padding: var(--shell-space-step4) var(--shell-space-step7); border-radius: var(--shell-radius-control); white-space: nowrap; color: var(--shell-muted); }
-.docs-tabs button:hover { background: var(--shell-hover); }
-.docs-tabs button[aria-selected="true"] { background: var(--shell-selection); color: var(--shell-text); }
-.docs-body { flex: 1; min-height: 0; overflow: auto; padding: var(--shell-space-step16); line-height: 1.5; overflow-wrap: anywhere; }
-.docs pre { white-space: pre-wrap; overflow-wrap: anywhere; background: color-mix(in srgb, var(--shell-text) 5.5%, transparent); padding: var(--shell-space-step11) var(--shell-space-step14); border-radius: var(--shell-radius-code); font-size: var(--shell-type-code); }
-.docs code { font-family: var(--shell-font-mono); }
-.docs .chat-markdown a { color: var(--shell-accent); }
-.docs table { border-collapse: collapse; }
-.docs td, .docs th { padding: var(--shell-space-step4) var(--shell-space-step8); border: 1px solid var(--shell-line); }
 
 /* Title-bar Update button (Mac: UpdatePill.swift titlebar accessory). It sits on the top strip at the sidebar's trailing edge, level with the machine row. */
 .layout { position: relative; }
@@ -232,14 +221,6 @@ footer { color: var(--shell-muted); padding: var(--shell-space-step12) var(--she
 .factory-usage-glyph.blocked { border-radius: calc(var(--shell-radius-row) * .3); }
 .factory-usage-glyph.idle { background: transparent; border: 1px solid currentColor; }
 
-.docs-header { display: flex; align-items: center; flex-shrink: 0; }
-.docs-header .docs-tabs { flex: 1; min-width: 0; }
-.docs-header > button { padding: var(--shell-space-step4) var(--shell-space-step7); }
-.docs-address { display: flex; align-items: center; gap: var(--shell-space-step8); height: calc(var(--shell-space-step24) + var(--shell-space-step2)); padding: 0 var(--shell-space-step8) 0 calc(var(--shell-space-step52) + var(--shell-space-step24) + var(--shell-space-step2)); color: var(--shell-muted); }
-.docs-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
-.docs-address button { flex: 0 0 calc(var(--shell-space-step32) + var(--shell-space-step12)); color: var(--shell-muted); }
-.docs-add { padding: var(--shell-space-step4) var(--shell-space-step8); }
-.docs-add input { width: 100%; font: inherit; color: var(--shell-text); background: var(--shell-surface); border: 1px solid var(--shell-line); }
 
 .sidebar-section-title { display: flex; align-items: center; justify-content: space-between; }
 .sidebar-plus { color: var(--shell-muted); flex-shrink: 0; font-size: var(--shell-type-glyph); }

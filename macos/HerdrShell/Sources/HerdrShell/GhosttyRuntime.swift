@@ -114,18 +114,14 @@ final class GhosttyRuntime {
         // even from an agent run). The bytes are only valid until this returns.
         if action.tag == GHOSTTY_ACTION_OPEN_URL {
             let raw = text(action.action.open_url.url, len: Int(action.action.open_url.len))
-            let paneId: String?
             // A link opens from a click, so Shift is the click's, not the keyboard's now.
             let shift: Bool
             if target.tag == GHOSTTY_TARGET_SURFACE, let ud = ghostty_surface_userdata(target.target.surface) {
-                let view = Unmanaged<SurfaceView>.fromOpaque(ud).takeUnretainedValue()
-                paneId = view.paneId
-                shift = view.clickShift
+                shift = Unmanaged<SurfaceView>.fromOpaque(ud).takeUnretainedValue().clickShift
             } else {
-                paneId = nil
                 shift = NSEvent.modifierFlags.contains(.shift)
             }
-            DispatchQueue.main.async { openLink(raw, paneId: paneId, shift: shift) }
+            DispatchQueue.main.async { openLink(raw, shift: shift) }
             return true
         }
         if action.tag == GHOSTTY_ACTION_MOUSE_OVER_LINK, target.tag == GHOSTTY_TARGET_SURFACE,
@@ -153,26 +149,24 @@ final class GhosttyRuntime {
     }
 
     /// Capture Shift at activation, before an asynchronous server lookup can outlive
-    /// the click. Desk routes still reach the lab server in agent runs; only external
-    /// routes suppress NSWorkspace there.
-    static func openLink(_ raw: String, paneId: String?,
-                         shift: Bool = NSEvent.modifierFlags.contains(.shift)) {
+    /// the click. Pages open in Aside; Shift and mailto open outside it.
+    static func openLink(_ raw: String, shift: Bool = NSEvent.modifierFlags.contains(.shift)) {
         guard let url = linkURL(raw) else { return }
-        var route = LinkRoute.decide(url, shift: shift)
+        let route = LinkRoute.decide(url, shift: shift)
         guard route != .ignore else { return }
-        let controller = (NSApp.delegate as? AppDelegate)?.controller
-        // A file in another machine's pane lives on that machine: only the desk can read it.
-        if route == .external, url.isFileURL, let paneId, Machines.split(paneId) != nil, controller != nil { route = .desk }
-        if route == .desk, controller == nil { route = .external }
         let s = url.absoluteString
         if agentRun { log("open_url \(s)") }
-        OpenedLinks.shared.record(route == .desk ? "desk \(s)" : s)
+        // A terminal can print any link: an app or executable is shown in Finder, never run.
+        if url.isFileURL, isLaunchable(url) {
+            OpenedLinks.shared.record(s)
+            if !agentRun { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+            return
+        }
         switch route {
-        case .desk: controller?.openOnDesk(url, paneId: paneId)
+        case .aside: ReviewDocOpener.open(url)
         case .external:
-            guard !agentRun else { break }
-            // A terminal can print any link: an app or executable is shown in Finder, never run.
-            if url.isFileURL, isLaunchable(url) { NSWorkspace.shared.activateFileViewerSelecting([url]) } else { shellOpen(url) }
+            OpenedLinks.shared.record(s)
+            if !agentRun { shellOpen(url) }
         case .ignore: break
         }
     }

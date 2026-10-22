@@ -22,18 +22,22 @@ enum ReviewDocOpener {
 
     static func open(_ doc: TabDoc) {
         guard let url = url(doc) else { log("review doc: bad url \(doc.url)"); return }
+        open(url)
+    }
+
+    static func open(_ url: URL) {
         OpenedLinks.shared.record("aside " + url.absoluteString)
         if agentRun {
             log("open ignored (--agent-run) aside \(url.absoluteString)")
             return
         }
         guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: asideBundle) else {
-            log("review doc: Aside not installed, default browser")
+            log("aside: not installed, default browser")
             NSWorkspace.shared.open(url)
             return
         }
         NSWorkspace.shared.open([url], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration()) { _, error in
-            if let error { log("review doc: Aside open failed \(error.localizedDescription)") }
+            if let error { log("aside: open failed \(error.localizedDescription)") }
         }
     }
 }

@@ -14,5 +14,5 @@ while ! mkdir "$lock" 2>/dev/null; do
     sleep 20
 done
 trap 'rm -f "$lock/owner"; rmdir "$lock"' EXIT
-printf 'desk-s2-build %s\n' "$(date +%s)" > "$lock/owner"
+printf 'shell-build %s\n' "$(date +%s)" > "$lock/owner"
 nice -n 10 swift build -c release

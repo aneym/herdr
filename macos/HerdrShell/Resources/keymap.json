@@ -196,12 +196,6 @@
       "menu": "View"
     },
     {
-      "chord": "cmd+\\",
-      "action": "toggle_docs",
-      "title": "Toggle Docs",
-      "menu": "View"
-    },
-    {
       "chord": "cmd+opt+1",
       "action": "filter_1",
       "title": "Filter All",

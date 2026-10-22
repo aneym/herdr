@@ -281,7 +281,7 @@ fn close_caller_pid(stream: &LocalStream) -> Option<u32> {
                 &mut size,
             )
         };
-        return (result == 0).then_some(pid as u32);
+        (result == 0).then_some(pid as u32)
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -762,11 +762,6 @@ pub(crate) fn api_method_name(method: &Method) -> &'static str {
         Method::TabRename(_) => "tab.rename",
         Method::TabMove(_) => "tab.move",
         Method::TabSetPinned(_) => "tab.set_pinned",
-        Method::DeskOpen(_) => "desk.open",
-        Method::DeskClose(_) => "desk.close",
-        Method::DeskFocus(_) => "desk.focus",
-        Method::DeskList(_) => "desk.list",
-        Method::DeskRead(_) => "desk.read",
         Method::TabDocSet(_) => "tab.doc_set",
         Method::TabDocClear(_) => "tab.doc_clear",
         Method::TabDocGet(_) => "tab.doc_get",

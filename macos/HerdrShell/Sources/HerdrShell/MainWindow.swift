@@ -6,7 +6,7 @@ import SwiftUI
 // SurfaceRegistry (retained surfaces and their attach lifecycle) lives in SurfaceRegistry.swift.
 
 /// Lays out one tab's panes using herdr's own split geometry (layouts[].panes[].rect).
-/// Sits in the titlebar band like the docs header (DocPanelView): never a window drag region.
+/// Sits in the titlebar band: never a window drag region.
 final class CapHostingView: NSHostingView<PaneCapBar> {
     override var acceptsFirstResponder: Bool { false }
     override var mouseDownCanMoveWindow: Bool { false }
@@ -213,8 +213,6 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     var root: RootView!
     /// P11: details beside the sidebar (DetailPanel.swift).
     private(set) var detailPanel: DetailPanelController!
-    /// P15/P16: docs on the right of the panes.
-    private(set) var docPanel: DocPanelController!
     private var focusedPaneByTab: [String: String] = [:]
     private var lastLayoutKey = ""
     let commands: HerdrCommands
@@ -265,26 +263,16 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         root = RootView(sidebar: sidebarContainer, host: host)
         detailPanel = DetailPanelController(herdr: model, theme: theme) { [weak self] id in self?.openFullTab(id) }
         root.detail = detailPanel.view
-        docPanel = DocPanelController()
-        docPanel.attach(self)
-        docPanel.onClose = { [weak self] in self?.setDocs(open: false) }
-        docPanel.onWidth = { [weak self] w in self?.setDocs(width: w) }
-        root.docs = docPanel.view
-        syncDocsShown()
-        applyDocs()
         root.sidebarVisible = state.sidebarVisible
         Keymap.shared.addContextual(chord: "escape", action: "close_detail") { [weak self] in
             guard let self, !self.quickSwitch.isOpen else { return false }
-            return self.docPanel.hasFocus || self.detailClaimsEscape
+            return self.detailClaimsEscape
         }
         Keymap.shared.addContextual(chord: "escape", action: "close_settings") { [weak self] in
             self?.settingsOpen == true && self?.quickSwitch.isOpen == false
         }
         Keymap.shared.addContextual(chord: "escape", action: "close_switcher") { [weak self] in
             self?.quickSwitch.isOpen == true
-        }
-        Keymap.shared.addContextual(chord: "cmd+l", action: "focus_doc_address") { [weak self] in
-            self?.docPanel.hasFocus == true && self?.docPanel.showingWeb == true
         }
         window.contentView = root
         quickSwitch.install(in: root, theme: theme)
@@ -303,11 +291,6 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         // $machines fires before the value lands; read it on the next turn.
         model.$machines.receive(on: RunLoop.main).sink { [weak self] _ in
             DispatchQueue.main.async { self?.machinesChanged(); self?.paneDrag.machinesChanged() }
-        }.store(in: &bag)
-        model.catalog.objectWillChange.receive(on: RunLoop.main).sink { [weak self] _ in
-            DispatchQueue.main.async {
-                self?.refreshDocs()
-            }
         }.store(in: &bag)
 
         host.onDividerDrag = { [weak self] d, phase, delta, extentPx in
@@ -374,7 +357,6 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     /// Persist the UI the shell can put back after it is replaced. The panes stay up.
     func saveForRelaunch() {
         state.saveSelected()
-        state.saveDocs()
         if let row = state.detailRow { Channel.store.set(row, forKey: Channel.detailRowKey) }
         let f = window.frame
         Channel.store.set("\(f.origin.x),\(f.origin.y),\(f.size.width),\(f.size.height)", forKey: Channel.frameKey)
@@ -383,8 +365,6 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             "selectedTab": state.selectedTab ?? "",
             "selectedRow": state.detailRow ?? "",
             "sidebarMode": state.mode.rawValue,
-            "docTabs": docPanel.tabTitles,
-            "docActive": docPanel.active ?? "",
             "paneModes": Channel.paneModes(),
             "windowFrame": [f.origin.x, f.origin.y, f.size.width, f.size.height],
         ]
@@ -435,7 +415,6 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         root.setBackground(t.windowBgNS)
         host.setBackground(t.terminalBgNS)
         sidebarContainer.apply(glass: theme.glass.sidebar, panel: NSColor(hex: t.chrome.panel))
-        docPanel?.apply(panel: NSColor(hex: t.chrome.panel), ink: NSColor(hex: t.chrome.ink))
         host.tokens = t
         host.needsLayout = true
         syncBootStatus()
@@ -514,7 +493,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             return
         }
         // Another machine's tab waits for that machine's first answer instead of being dropped.
-        if let t = state.selectedTab, !model.machineLoaded(for: t) { refreshDocs(); return }
+        if let t = state.selectedTab, !model.machineLoaded(for: t) { return }
         if let t = state.selectedTab, model.hasTab(t) {
             refreshHost()
             if !didRestoreTabFocus {
@@ -528,7 +507,6 @@ final class MainWindowController: NSObject, NSWindowDelegate {
                     didRestorePaneFocus = true
                 }
             }
-            refreshDocs()
             return
         }
         if state.selectedTab != nil, model.snapshot != nil {
@@ -539,7 +517,6 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             selectTab(first.id)
             return
         }
-        refreshDocs()
         refreshHost()
     }
 
@@ -549,21 +526,15 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     func machinesChanged() {
         for m in model.machines { if let s = m.snapshot { NewPanes.shared.observe(source: m.name, paneIds: s.panes.map(\.pane_id)) } }
         let remote = [state.selectedTab, pendingSelectTab].contains { $0.map(Machines.isRemote) == true }
-        guard remote else { refreshDocs(); return }
+        guard remote else { return }
         snapshotChanged()
     }
 
-    var forcedEmptyDocs = false
-    /// The last click or scroll landed in the docs column. ⌘W then closes the column even
-    /// after a doc tab click handed keyboard focus back to the pane.
-    var docsLastClicked = false
-
-    func selectTab(_ tabId: String, revealDocs: Bool = false) {
+    func selectTab(_ tabId: String, stepping: Bool = false) {
         paneDrag.selectionChanging(to: tabId)
-        if state.selectedTab != tabId { forcedEmptyDocs = false; docsLastClicked = false }
         quickSwitch.noteSelected(tabId)
         noteLookedAt(tabId)
-        let stepping = state.focusCursor != nil && revealDocs
+        let stepping = state.focusCursor != nil && stepping
         revealSpace(of: tabId)
         state.selectedTab = tabId
         if !stepping { state.focusCursor = nil }
@@ -571,7 +542,6 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         if !Machines.isRemote(tabId) { focusHerdr(tabId) }
         lastLayoutKey = ""
         refreshHost()
-        refreshDocs()
         focusPane(focusedPaneByTab[tabId] ?? host.rects.first?.0.paneId)
     }
 
@@ -586,75 +556,9 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         }
     }
 
-    private var seenDeskIds: [String: Set<String>]?
-
-    func openOnDesk(_ url: URL, paneId: String?) {
-        let tabId = paneId.flatMap { id in model.pane(id)?.tab_id } ?? state.selectedTab
-        guard let tabId else { return }
-        var params: [String: Any] = ["ref": url.isFileURL ? url.path : url.absoluteString, "opened_by": "user"]
-        if let paneId { params["pane_id"] = paneId } else { params["tab_id"] = tabId }
-        let cmds = commands
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let result = cmds.deskReply("desk.open", params: params)
-            DispatchQueue.main.async {
-                guard let self else { return }
-                switch result {
-                case .unsupported: self.docPanel.addTransient(url, tabId: tabId)
-                case .failed:
-                    // A refused open (say a file the pane's server cannot see) still opens, in the browser.
-                    OpenedLinks.shared.record(url.absoluteString)
-                    shellOpen(url)
-                    return
-                case .result(let reply):
-                    if let id = reply["item_id"] as? String { self.docPanel.openDesk(id, tabId: tabId) }
-                }
-                SidebarState.store.set(true, forKey: Self.docsShownKey(tabId))
-                if self.state.selectedTab == tabId { self.setDocs(open: true) }
-            }
-        }
-    }
-
-    private func refreshDocs() {
-        let snapshots = [model.snapshot].compactMap { $0 } + model.machines.compactMap(\.snapshot)
-        if !snapshots.isEmpty {
-            let desks = Dictionary(snapshots.flatMap(\.tabs).map { ($0.tab_id, $0.desk ?? .empty) },
-                                   uniquingKeysWith: { _, latest in latest })
-            let newTabs = landed(previous: seenDeskIds, current: desks,
-                                 machineForTab: { Machines.split($0)?.machine ?? "" })
-            seenDeskIds = desks.mapValues { Set($0.items.map(\.id)) }
-            for tab in newTabs { SidebarState.store.set(true, forKey: Self.docsShownKey(tab)) }
-            docPanel.show(model: model, tabId: state.selectedTab)
-            if let selected = state.selectedTab, newTabs.contains(selected) {
-                if let front = desks[selected]?.front { docPanel.activateDesk(front) }
-                setDocs(open: true)
-            }
-        } else {
-            docPanel.show(model: model, tabId: state.selectedTab)
-        }
-        syncDocsShown()
-        applyDocs()
-    }
-
-    /// Docs are shown per tab and only once asked for (⌘\ or Toggle Docs). The key is new:
-    /// the old window-wide `docOpen` kept RESUME and BRIEF open on every lane.
-    private static func docsShownKey(_ tab: String) -> String { "herdr.shell.docsShown.\(tab)" }
-
-    private func syncDocsShown() {
-        state.docOpen = state.selectedTab.map { SidebarState.store.bool(forKey: Self.docsShownKey($0)) } ?? false
-    }
-
-    /// ⌘W follows focus: with the docs column focused or last clicked it closes what ✕
-    /// closes, never the pane.
-    var docsOwnClose: Bool { root.docsOpen && (docPanel.hasFocus || docsLastClicked) }
-
-    func closeDocs() {
-        docPanel.closeActive()
-        docsLastClicked = root.docsOpen
-    }
-
-    /// Areas-mode row click, ⌘1..9 and Focus next/prev: select the tab. Docs stay as that tab left them.
+    /// Areas-mode row click, ⌘1..9 and Focus next/prev: select the tab.
     func selectAreaTab(_ tabId: String) {
-        selectTab(tabId, revealDocs: true)
+        selectTab(tabId, stepping: true)
     }
 
     func focusStep(_ delta: Int) {
@@ -671,27 +575,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         }
         let i = (next % ids.count + ids.count) % ids.count
         state.focusCursor = i + 1
-        selectTab(ids[i], revealDocs: true)
-    }
-
-    func setDocs(open: Bool? = nil, width: CGFloat? = nil) {
-        if let open {
-            state.docOpen = open
-            if let tab = state.selectedTab { SidebarState.store.set(open, forKey: Self.docsShownKey(tab)) }
-            if !open { docsLastClicked = false }
-        }
-        if let width { state.docWidth = max(DocPanelController.minWidth, width) }
-        state.saveDocs()
-        applyDocs()
-    }
-
-    private func applyDocs() {
-        let visible = state.docOpen && (docPanel.hasDocs || forcedEmptyDocs)
-        root.docsOpen = visible
-        root.docs?.isHidden = !visible
-        root.docsWidth = state.docWidth
-        root.needsLayout = true
-        root.layoutSubtreeIfNeeded()
+        selectTab(ids[i], stepping: true)
     }
 
     private func focusHerdr(_ tabId: String) {
@@ -1116,7 +1000,6 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             lastLayoutKey = ""
             refreshHost()
             if let focused { focusPane(focused) }
-            refreshDocs()
             return true
         }
         if let next = pending.pins.first(where: { model.hasTab($0) }) {
@@ -1299,10 +1182,6 @@ final class ShellWindow: NSWindow {
         if event.type == .keyDown, let c = delegate as? MainWindowController, c.quickSwitch.sink(event) {
             return
         }
-        if [.leftMouseDown, .rightMouseDown, .scrollWheel].contains(event.type),
-           let c = delegate as? MainWindowController, let docs = c.root.docs {
-            c.docsLastClicked = c.root.docsOpen && docs.bounds.contains(docs.convert(event.locationInWindow, from: nil))
-        }
         super.sendEvent(event)
     }
 
@@ -1319,7 +1198,7 @@ final class ShellWindow: NSWindow {
 }
 
     /// Fixed-width sidebar and a pane host filling the rest. (An NSSplitView let the
-    /// SwiftUI sidebar claim half the window.) Docs sit to the right of the panes.
+    /// SwiftUI sidebar claim half the window.)
     final class RootView: NSView {
         let sidebar: NSView, host: NSView
         static let sidebarWidth: CGFloat = ShellSpace.sidebarWidth
@@ -1333,16 +1212,6 @@ final class ShellWindow: NSWindow {
         var detailOpen = false {
             didSet { detail?.isHidden = !detailOpen; needsLayout = true }
         }
-        var docs: NSView? {
-            didSet {
-                oldValue?.removeFromSuperview()
-                if let docs { addSubview(docs) }
-            }
-        }
-        var docsOpen = false {
-            didSet { docs?.isHidden = !docsOpen; needsLayout = true }
-        }
-        var docsWidth: CGFloat = DocPanelController.defaultWidth
         var factory: NSView?
         var settings: NSView? {
             didSet {
@@ -1390,13 +1259,7 @@ final class ShellWindow: NSWindow {
             detail.frame = NSRect(x: x, y: 0, width: DetailPanelController.width, height: bounds.height)
             x += DetailPanelController.width + 1
         }
-        var docW: CGFloat = 0
-        if let docs, docsOpen {
-            docW = max(DocPanelController.minWidth, docsWidth)
-            docs.frame = NSRect(x: bounds.width - docW, y: 0, width: docW, height: bounds.height)
-            docW += 1
-        }
-        host.frame = NSRect(x: x, y: 0, width: max(0, bounds.width - x - docW), height: bounds.height)
+        host.frame = NSRect(x: x, y: 0, width: max(0, bounds.width - x), height: bounds.height)
         factory?.frame = host.frame
         if let settings {
             settings.frame = bounds

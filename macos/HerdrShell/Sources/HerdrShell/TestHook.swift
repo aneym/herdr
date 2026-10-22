@@ -116,8 +116,6 @@ final class TestHook {
             mouse(obj)
         case "drag_divider":
             dragDivider(obj)
-        case "drag_doc_handle":
-            dragDocHandle(obj)
         case "pane-drag":
             paneDragEvent(obj)
         case "motion":
@@ -210,10 +208,6 @@ final class TestHook {
             let h = CGFloat(obj["h"] as? Double ?? Double(obj["h"] as? Int ?? 900))
             controller?.window.setContentSize(NSSize(width: w, height: h))
             controller?.pinOffscreen()
-        case "docs":
-            let open = obj["open"] as? Bool
-            let width = (obj["width"] as? Double).map { CGFloat($0) } ?? (obj["width"] as? Int).map { CGFloat($0) }
-            controller?.setDocs(open: open, width: width)
         case "factory":
             controller?.setFactory(open: obj["open"] as? Bool ?? true)
         case "settings":
@@ -261,7 +255,7 @@ final class TestHook {
             }
         case "open_url_sim":
             // Same path as GHOSTTY_ACTION_OPEN_URL, without a surface under the pointer.
-            GhosttyRuntime.openLink(obj["url"] as? String ?? "", paneId: nil)
+            GhosttyRuntime.openLink(obj["url"] as? String ?? "")
         case "activate":
             if agentRun {
                 log("hook: activate ignored (--agent-run)")
@@ -343,12 +337,6 @@ final class TestHook {
             }
             let x = f.maxX - PaneCapBar.trailing - PaneCapBar.pinWidth - 8 - PaneCapBar.pinWidth / 2
             postClick(c, loc: c.host.convert(NSPoint(x: x, y: f.midY), to: nil), mods: clickMods(obj))
-            return
-        case "doc_tab":
-            let name = obj["label"] as? String ?? ""
-            guard let b = c.docPanel.tabButton(name) else { log("hook: click: no doc tab \(name)"); return }
-            let loc = b.convert(NSPoint(x: b.bounds.midX, y: b.bounds.midY), to: nil)
-            postClick(c, loc: loc, mods: clickMods(obj))
             return
         default:
             view = c.sidebarHostView
@@ -524,45 +512,6 @@ final class TestHook {
                 self?.dragRunning = false
             }
         }
-    }
-
-    /// {"cmd":"drag_doc_handle","dx":-80,"steps":8,"interval":0.05}: press on the docs column's
-    /// width handle, drag `dx` points (right positive) and release, through window.sendEvent so
-    /// a non-key window applies its first-mouse rule as for a physical click. `drag_running` in
-    /// the state says when it is done.
-    private func dragDocHandle(_ obj: [String: Any]) {
-        // A hidden column has no laid-out handle; pressing its zero frame would hit the window corner.
-        guard let c = controller, !dragRunning, !c.docPanel.view.isHidden, c.docPanel.view.window != nil,
-              c.docPanel.widthHandle.bounds.height > 0 else { log("hook: drag_doc_handle: no docs column"); return }
-        let h = c.docPanel.widthHandle
-        let dx = CGFloat(obj["dx"] as? Double ?? Double(obj["dx"] as? Int ?? 0))
-        let steps = max(1, obj["steps"] as? Int ?? 8)
-        let interval = obj["interval"] as? Double ?? 0.05
-        let start = h.convert(NSPoint(x: h.bounds.midX, y: h.bounds.midY), to: nil)
-        func post(_ type: NSEvent.EventType, _ p: NSPoint) {
-            guard let ev = NSEvent.mouseEvent(with: type, location: p, modifierFlags: [],
-                                              timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: c.window.windowNumber,
-                                              context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1) else { return }
-            c.window.sendEvent(ev)
-        }
-        dragRunning = true
-        delivered.append("drag_doc_handle dx=\(dx) key=\(c.window.isKeyWindow) via window.sendEvent")
-        post(.leftMouseDown, start)
-        var i = 0
-        // Common modes, so the release still comes while AppKit tracks the mouse.
-        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] t in
-            i += 1
-            let p = NSPoint(x: start.x + dx * CGFloat(min(i, steps)) / CGFloat(steps), y: start.y)
-            if i <= steps {
-                post(.leftMouseDragged, p)
-            } else {
-                post(.leftMouseUp, p)
-                t.invalidate()
-                self?.dragRunning = false
-            }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        dragTimer = timer
     }
 
     /// {"cmd":"drag_pin","row":"pinned:<tab>","dy":48,"steps":8,"interval":0.05,"esc":false}: press
@@ -1084,7 +1033,6 @@ final class TestHook {
             "spaces_menus": Dictionary(c.model.spacesRows(state: c.state).filter { $0.tab != nil }
                 .map { ($0.id, RowMenu.items(for: $0, model: c.model).map(\.rawValue)) }, uniquingKeysWith: { a, _ in a }),
             "spaces_chrome": (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(c.state.spacesChrome))) ?? [:],
-            "docs_visible": c.root.docsOpen,
             "settings_open": c.settingsOpen,
             "settings_frame": c.root.settings.map { [$0.frame.minX, $0.frame.minY, $0.frame.width, $0.frame.height] } ?? [],
             "window_content": [c.root.bounds.width, c.root.bounds.height],
@@ -1102,11 +1050,8 @@ final class TestHook {
                 "folded_areas": c.state.foldedAreas.sorted(),
                 "focus_expanded": c.state.focusExpanded,
                 "focus_cursor": c.state.focusCursor ?? NSNull(),
-                "doc_open": c.state.docOpen,
-                "doc_width": c.state.docWidth,
                 "factory_open": c.state.factoryOpen,
                 "running_commit": Channel.commit,
-                "doc_frame_width": c.root.docs?.frame.width ?? 0,
                 "selected_tab": c.state.selectedTab ?? NSNull(),
             ],
             "update_pill": c.updates?.shown ?? false,
@@ -1131,10 +1076,6 @@ final class TestHook {
             "hosts_provider": c.model.hostsModel.provider.name,
             "theme": themeState(c),
             "detail": detailState(c),
-            "docs": c.docPanel.dump(),
-            "desk": ["items": (c.state.selectedTab.flatMap { c.model.source(for: $0) }?.tabs.first { $0.tab_id == c.state.selectedTab }?.desk?.items ?? []).map { ["id": $0.id, "ref": $0.ref, "kind": $0.kind] },
-                     "front": c.state.selectedTab.flatMap { c.model.source(for: $0) }?.tabs.first { $0.tab_id == c.state.selectedTab }?.desk?.front as Any? ?? NSNull(),
-                     "active_item": c.docPanel.activeItem as Any? ?? NSNull()],
             "last_remote": RemoteActions.last,
             "opened_urls": OpenedLinks.shared.urls,
             "tab_docs": Dictionary(uniqueKeysWithValues: (c.model.snapshot?.tabs ?? []).compactMap { tab in tab.doc.map { (tab.tab_id, ["url": $0.url, "title": $0.title]) } }),

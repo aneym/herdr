@@ -583,7 +583,7 @@ impl App {
         }
         self.state.unpin_tab(&tab_id);
         self.focus_after_pinned_close(successor);
-        self.state.prune_desks();
+        self.state.prune_docs();
         self.state.mark_session_dirty();
         self.state.remove_plugin_pane_records(pane_ids);
         self.state.remove_unattached_terminal_ids(terminal_ids);

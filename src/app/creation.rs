@@ -276,17 +276,11 @@ impl App {
             sort_rank: self
                 .priority_tab_rank_with_workspace(ws_idx, tab_idx, &tab_id, workspace_rank)
                 .value,
-            desk: self
-                .state
-                .desks
-                .get(&tab_id)
-                .filter(|desk| !desk.info.items.is_empty())
-                .map(|desk| desk.info.clone()),
             doc: self
                 .state
-                .desks
+                .docs
                 .get(&tab_id)
-                .and_then(|desk| desk.doc.clone()),
+                .and_then(|entry| entry.doc.clone()),
             hidden: self
                 .state
                 .pinned_tabs

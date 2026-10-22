@@ -21,8 +21,7 @@ final class UpdateController: NSObject {
         pill.setButtonType(.momentaryPushIn)
         pill.frame = NSRect(x: 0, y: 1, width: 76, height: 20)
         box.addSubview(pill)
-        // Left, beside the window buttons, over the sidebar's empty strip. On the right it sat
-        // over the docs column's + and ✕ and took their clicks.
+        // Left, beside the window buttons, over the sidebar's empty strip.
         accessory.layoutAttribute = .left
         accessory.view = box
         controller.window.addTitlebarAccessoryViewController(accessory)

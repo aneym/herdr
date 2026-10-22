@@ -148,7 +148,6 @@ def main():
     check("query rec ranks recruiter ahead of rolodex-record",
           bool(res) and res[0] == recruiter and rolodex in res and res.index(recruiter) < res.index(rolodex),
           f"{res}")
-    S.cmd({"cmd": "docs", "open": False})
     for mode in ("light", "dark"):
         S.cmd({"cmd": "appearance", "mode": mode})
         time.sleep(0.6)

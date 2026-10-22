@@ -38,7 +38,6 @@ struct LaneRecord: Equatable {
     var goalArea: String?
     var section: String?
     var scopeURL: String?
-    var reviewURL: String?
 }
 
 /// A parked tab: out of every filter but Parked, resumable in one click.
@@ -221,8 +220,7 @@ final class LaneCatalog: ObservableObject {
             out[tab] = LaneRecord(tab: tab, name: str(item["name"]) ?? str(item["label"]) ?? tab,
                                   label: str(item["label"]) ?? "", kind: str(item["kind"]),
                                   goal: str(item["goal"]), goalArea: str(item["goal_area"]),
-                                  section: str(item["section"]), scopeURL: str(item["scope_url"]),
-                                  reviewURL: str(item["review_url"]))
+                                  section: str(item["section"]), scopeURL: str(item["scope_url"]))
         }
         return out
     }

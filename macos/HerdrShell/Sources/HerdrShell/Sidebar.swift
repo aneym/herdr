@@ -36,9 +36,7 @@ final class SidebarState: ObservableObject {
     @Published var focusExpanded: Bool
     /// 1-based index into the Focus ranking while ⌘] / ⌘[ is stepping. Nil otherwise.
     @Published var focusCursor: Int?
-    @Published var docOpen: Bool
-    @Published var docWidth: CGFloat
-    /// The sidebar column. Hidden, the pane host takes that width. Persists like docs.
+    /// The sidebar column. Hidden, the pane host takes that width.
     @Published var sidebarVisible: Bool
     /// Factory view fills the pane host while this is true.
     @Published var factoryOpen = false
@@ -63,10 +61,7 @@ final class SidebarState: ObservableObject {
         foldedAreas = Set(d.stringArray(forKey: Self.prefix + "folded") ?? [])
         focusExpanded = (d.object(forKey: Self.prefix + "focusExpanded") as? Bool) ?? false
         selectedTab = d.string(forKey: Self.prefix + "selectedTab")
-        docOpen = (d.object(forKey: Self.prefix + "docOpen") as? Bool) ?? false
-        docWidth = CGFloat((d.object(forKey: Self.prefix + "docWidth") as? Double) ?? 420)
         sidebarVisible = (d.object(forKey: Self.prefix + "sidebarVisible") as? Bool) ?? true
-        if docWidth < 320 { docWidth = 320 }
     }
 
     func setMode(_ m: SidebarMode) {
@@ -101,12 +96,6 @@ final class SidebarState: ObservableObject {
     func saveSelected() {
         if let selectedTab { write("selectedTab", selectedTab) }
         else { Self.store.removeObject(forKey: Self.prefix + "selectedTab"); sync() }
-    }
-
-    func saveDocs() {
-        Self.store.set(docOpen, forKey: Self.prefix + "docOpen")
-        Self.store.set(Double(docWidth), forKey: Self.prefix + "docWidth")
-        sync()
     }
 
     func saveSidebar() {

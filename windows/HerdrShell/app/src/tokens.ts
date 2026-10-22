@@ -85,8 +85,6 @@ export const space = {
   chatItemGap: 18,
   chatBlockGap: 12,
   toolRow: 22,
-  docWidth: 420,
-  docMinWidth: 320,
   switcherWidth: 560,
   terminalPadX: 8,
   terminalPadY: 6,

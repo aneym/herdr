@@ -50,7 +50,7 @@ beforeEach(async () => {
   vi.spyOn(bridge, "close").mockResolvedValue();
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
   act(() => root.render(<Surface />));
-  stop = installControl(() => ({ paneDrag: drag, machine, machines: [machine], chooseMachine: () => machine, selected: "t", docs: { open: false, items: [], active: null }, rows: [], panes: [], focused: undefined, open: () => {}, action: async () => {} }));
+  stop = installControl(() => ({ paneDrag: drag, machine, machines: [machine], chooseMachine: () => machine, selected: "t", rows: [], panes: [], focused: undefined, open: () => {}, action: async () => {} }));
   await act(async () => { await vi.advanceTimersByTimeAsync(0); });
   document.elementFromPoint = (x) => x < 0 ? host.querySelector('[data-tab="target"]') : host.querySelector('[data-pane="a"] .pane-cap');
 });

@@ -5,7 +5,6 @@ fn tab_overflow_controls_scroll_the_client_owned_tab_bar() {
     let mut snapshot = snapshot();
     snapshot.tabs.extend((2..=8).map(|number| ClientShellTab {
         sort_rank: 0,
-        desk_count: 0,
         tab_id: format!("tab_{number}"),
         workspace_id: "ws_1".into(),
         number,
@@ -68,7 +67,6 @@ fn focused_last_overflow_tab_shows_its_full_label() {
         .enumerate()
         .map(|(index, label)| ClientShellTab {
             sort_rank: 0,
-            desk_count: 0,
             tab_id: format!("tab_{}", index + 1),
             workspace_id: "ws_1".into(),
             number: index + 1,

@@ -3,7 +3,7 @@ import { bridge, fromBase64 } from "./bridge";
 import { AGENTS_DIR, faceDot, faceHover, parseCard } from "./faces";
 import type { AgentCard, Face } from "./faces";
 // The standing agents' cards live on the machine beside lanes.json (herdr serves no agent name or
-// picture), so they come over the file helper, as the docs column's files do.
+// picture), so they come over the file helper.
 export function useAgentCards(machine: string, up: boolean): Record<string, AgentCard> {
   const [cards, setCards] = useState<Record<string, AgentCard>>({});
   useEffect(() => {

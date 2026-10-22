@@ -52,7 +52,7 @@ def main():
             state.get("window_key") is True and bool(L.surface(state, pane)))
     S.wait_read(pane, lambda text: "%" in text, timeout=10)
     pid, window = L.app_window()
-    for name, printed, shown, desk in CASES:
+    for name, printed, shown, plain in CASES:
         url = f"{URL}-{name}"
         shown = shown.format(url=url)
         S.lab("herdr", "pane", "send-keys", pane, "C-c")
@@ -68,11 +68,11 @@ def main():
         answer = probe(pane, row)
         L.check(f"[{name}] the server resolves links on the pane the Shell shows", '"regions"' in answer, answer)
         L.quit_browser()
-        if desk:
+        if plain:
             before = list(state.get("opened_urls", []))
             L.real_click(pid, window, state, pane, 2, row, ("cmd",))
             opened = L.opened_after(before, 1)
-            L.check(f"[{name}] plain Cmd+click routes the URL to the desk", opened == ["desk " + url], f"opened={opened}")
+            L.check(f"[{name}] plain Cmd+click opens the URL in Aside", opened == ["aside " + url], f"opened={opened}")
             state = S.state()
         before = list(state.get("opened_urls", []))
         res = L.real_click(pid, window, state, pane, 2, row, ("cmd", "shift"))

@@ -24,7 +24,7 @@ describe("Explorer path drops", () => {
     [240, 40, "left"], [639, 599, "left"], [650, 200, "right"],
     [640, 200, null], [100, 200, null], [700, 20, null],
     [1050, 200, null], [700, 600, null],
-  ])("maps (%s, %s) to %s, ignoring sidebar/desk/gaps", (x, y, expected) => {
+  ])("maps (%s, %s) to %s, ignoring sidebar/gaps", (x, y, expected) => {
     expect(paneAtDrop(panes, { x, y })).toBe(expected);
   });
 });

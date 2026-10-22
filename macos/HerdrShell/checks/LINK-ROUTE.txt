@@ -1,8 +1,8 @@
-[PASS] http|false|desk
+[PASS] http|false|aside
 [PASS] http|true|external
-[PASS] https|false|desk
+[PASS] https|false|aside
 [PASS] https|true|external
-[PASS] file|false|desk
+[PASS] file|false|aside
 [PASS] file|true|external
 [PASS] mailto|false|external
 [PASS] mailto|true|external

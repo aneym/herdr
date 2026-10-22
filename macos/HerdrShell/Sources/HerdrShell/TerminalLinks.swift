@@ -76,7 +76,7 @@ final class TerminalLinks {
                 let target = TerminalLinkDecision.openTarget(resolved: resolved, activated: answer?.url,
                                                              handled: answer?.handled ?? false)
                 if let target, Self.webURL(target) != nil {
-                    GhosttyRuntime.openLink(target, paneId: paneId, shift: shift)
+                    GhosttyRuntime.openLink(target, shift: shift)
                     completion(true)
                 } else {
                     completion(answer?.handled ?? false)

@@ -166,34 +166,10 @@ def main():
         S.cmd({"cmd": "mouse", "pane": pane, "col": 2.0, "row": float(start + 1), "action": "move"})
         state = wait(lambda s: surface(s, pane).get("hovered_link") == "", 5)
         check("moving without Cmd clears the hovered link", surface(state, pane).get("hovered_link") == "")
-        click("Cmd-click on URL second row records the entire URL", start + 1, 2, "desk " + URL)
-        click("Cmd-click on URL first row records the entire URL", start, 5, "desk " + URL)
-
-        def relocate(timeout=10):
-            """The URL and label rows once the pane's width settles; the desk opened by the
-            first click narrows the terminal, so the URL rewraps and the label moves."""
-            deadline, found, last = time.monotonic() + timeout, (None, None), None
-            while time.monotonic() < deadline:
-                cols = surface(S.state(), pane).get("cols", 0)
-                rows = S.lab("herdr", "pane", "read", pane, "--source", "visible").splitlines()
-                url_row = next((i for i, line in enumerate(rows) if line.startswith(PREFIX)), None)
-                label = next((i for i, line in enumerate(rows) if line.strip() == "label"), None)
-                found = (url_row, label)
-                if cols and url_row is not None and label == url_row + -(-len(URL) // cols) and cols == last:
-                    break
-                last = cols
-                time.sleep(0.3)
-            return found
-
-        start, label_row = relocate()
-        check("rows found again after the desk narrowed the terminal", start is not None and label_row is not None,
-              f"start={start} label_row={label_row}")
+        click("Cmd-click on URL second row records the entire URL", start + 1, 2, "aside " + URL)
+        click("Cmd-click on URL first row records the entire URL", start, 5, "aside " + URL)
         if label_row is not None:
-            click("Cmd-click on OSC 8 label records its target", label_row, 2, "desk " + OSC_URL)
-        # The receipt is recorded before the open; the server's desk proves the open itself.
-        desk = json.loads(S.lab("herdr", "desk", "list", "--tab", tab, "--json"))
-        refs = json.dumps(desk)
-        check("the Cmd-clicked URLs landed on the pane's desk", URL in refs and OSC_URL in refs, refs[:300])
+            click("Cmd-click on OSC 8 label records its target", label_row, 2, "aside " + OSC_URL)
         click("Cmd-Shift-click opens the URL externally", start + 1, 2, URL, mods=("cmd", "shift"))
         click("plain click on the URL opens nothing", start + 1, 2, None, mods=())
         # This independently checks the existing hook/callback path, only after the
@@ -202,14 +178,7 @@ def main():
         S.cmd({"cmd": "open_url_sim", "url": OSC_URL})
         state = wait(lambda s: s.get("opened_urls", []) != before, 8)
         opened = state.get("opened_urls", [])
-        check("open_url_sim records the OSC 8 target", opened != before and bool(opened) and opened[-1] == "desk " + OSC_URL)
-        # A desk refusal still opens: a file the lab server cannot see goes to the browser.
-        missing = "file:///nonexistent-herdr-links-proof/" + uuid.uuid4().hex + ".md"
-        before = list(S.state().get("opened_urls", []))
-        S.cmd({"cmd": "open_url_sim", "url": missing})
-        state = wait(lambda s: len(s.get("opened_urls", [])) >= len(before) + 2, 8)
-        opened = state.get("opened_urls", [])[len(before):]
-        check("a refused desk open falls back to the browser", opened == ["desk " + missing, missing], json.dumps(opened))
+        check("open_url_sim records the OSC 8 target", opened != before and bool(opened) and opened[-1] == "aside " + OSC_URL)
     else:
         skip("wrapped-row mouse checks: physical continuation row was not established (see FAIL above)")
     chat_check(pane)

@@ -608,7 +608,7 @@ pub(super) fn pinned_tab_entries(
             hidden: agent && pin.hidden,
             workspace_id: pin.workspace_id.clone(),
             tab_id: pin.tab_id.clone(),
-            label: super::render::desk_label(tab.label.clone(), tab.desk_count),
+            label: tab.label.clone(),
             space_label: if agent { String::new() } else { space_label },
             home_location: agent.then_some(tab.home_location).flatten(),
             status,
@@ -1207,7 +1207,7 @@ pub(super) fn tree_list_entries_with_overlay(
                     workspace_id: workspace_id.clone(),
                     tab_id: Some(tab_id.clone()),
                     label: tab
-                        .map(|tab| super::render::desk_label(tab.label.clone(), tab.desk_count))
+                        .map(|tab| tab.label.clone())
                         .unwrap_or_else(|| tab_id.clone()),
                     key,
                     collapsed,
@@ -2576,7 +2576,7 @@ fn factory_row(
                 } else {
                     name
                 };
-                super::render::desk_label(label, tab.desk_count)
+                label
             },
             key: tab.tab_id.clone(),
             collapsed,

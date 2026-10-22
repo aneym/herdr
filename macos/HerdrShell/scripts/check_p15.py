@@ -420,7 +420,6 @@ def main():
 
     # Screenshots.
     click("chip", "all")
-    S.cmd({"cmd": "docs", "open": False})
     time.sleep(0.3)
     for mode in ("light", "dark"):
         S.cmd({"cmd": "appearance", "mode": mode})
@@ -458,16 +457,13 @@ def main():
     s = wait_state(lambda s: s["shell"]["chip"] == "review" and s["shell"]["area_only"] == "raise")
     click("row", "review packet")
     time.sleep(0.3)
-    S.cmd({"cmd": "docs", "open": True, "width": 510})
-    time.sleep(0.3)
     S.key("a", ["cmd", "shift"])
-    s = wait_state(lambda s: s["shell"]["mode"] == "spaces" and s["shell"]["doc_open"] is True and abs(s["shell"]["doc_width"] - 510) < 1)
+    s = wait_state(lambda s: s["shell"]["mode"] == "spaces")
     before = s["shell"] if s else {}
     say(f"saved setup: {json.dumps(before, default=str)}")
-    check("setup to restore is spaces / review / only raise / factory folded / focus open / docs 510",
+    check("setup to restore is spaces / review / only raise / factory folded / focus open",
           before.get("mode") == "spaces" and before.get("chip") == "review" and before.get("area_only") == "raise"
           and "factory" in before.get("folded_areas", []) and before.get("focus_expanded") is True
-          and before.get("doc_open") is True and abs(before.get("doc_width", 0) - 510) < 1
           and before.get("selected_tab") == review, f"{before}")
 
     S.app("stop")
@@ -482,10 +478,6 @@ def main():
     check("relaunch restores folded areas", "factory" in sh.get("folded_areas", []), f"folded={sh.get('folded_areas')}")
     check("relaunch restores Focus expanded", sh.get("focus_expanded") is True, f"focus={sh.get('focus_expanded')}")
     check("relaunch restores the selected tab", s is not None and s.get("selected_tab") == review, f"tab={None if s is None else s.get('selected_tab')}")
-    check("relaunch restores the doc panel open and its width",
-          sh.get("doc_open") is True and abs(sh.get("doc_width", 0) - 510) < 1
-          and abs(sh.get("doc_frame_width", 0) - 510) < 2,
-          f"open={sh.get('doc_open')} width={sh.get('doc_width')} frame={sh.get('doc_frame_width')}")
     # Back to Areas: the chip, fold and area filter are still in effect.
     S.key("a", ["cmd", "shift"])
     s = wait_state(lambda s: s["shell"]["mode"] == "areas")

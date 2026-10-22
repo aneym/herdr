@@ -524,7 +524,7 @@ struct ChatView: View {
         .foregroundStyle(p.ink)
         .background(p.page)
         .environment(\.openURL, OpenURLAction { url in
-            GhosttyRuntime.openLink(url.absoluteString, paneId: transcript.pane)
+            GhosttyRuntime.openLink(url.absoluteString)
             return .handled
         })
         .preferredColorScheme(theme.effective == .dark ? .dark : .light)

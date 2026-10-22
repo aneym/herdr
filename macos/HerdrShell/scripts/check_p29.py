@@ -233,7 +233,7 @@ def main():
     col = max(rows[row].find(URL), 0) if row < len(rows) else 0
 
     def link(u):
-        return u[len("desk "):] if u.startswith("desk ") else u
+        return u[len("aside "):] if u.startswith("aside ") else u
 
     def new_links(s, n):
         return [link(u) for u in ((s or {}).get("opened_urls") or [])[n:]]

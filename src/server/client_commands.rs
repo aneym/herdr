@@ -18,11 +18,6 @@ const CLIENT_SHELL_METHODS: &[&str] = &[
     "agent.usage",
     "client_shell.surface.set",
     "command.invoke",
-    "desk.close",
-    "desk.focus",
-    "desk.list",
-    "desk.open",
-    "desk.read",
     "integration.install",
     "integration.list",
     "layout.set_split_ratio",
@@ -93,11 +88,6 @@ pub(crate) fn client_shell_method_is_surface_independent(method: &Method) -> boo
             | Method::TabPinMove(_)
             | Method::TabSetRole(_)
             | Method::TabSetHidden(_)
-            | Method::DeskOpen(_)
-            | Method::DeskClose(_)
-            | Method::DeskFocus(_)
-            | Method::DeskList(_)
-            | Method::DeskRead(_)
     )
 }
 
@@ -357,18 +347,13 @@ mod tests {
             actual.remove("pane.place").is_some(),
             "pane.place must advertise a shape"
         );
-        // Additive profile, role and desk methods are advertised separately;
+        // Additive profile and role methods are advertised separately;
         // the published endpoint v1 fixture remains immutable.
         for method in [
             "profile.list",
             "profile.switch",
             "tab.set_role",
             "tab.set_hidden",
-            "desk.open",
-            "desk.close",
-            "desk.focus",
-            "desk.list",
-            "desk.read",
         ] {
             assert!(
                 actual.remove(method).is_some(),

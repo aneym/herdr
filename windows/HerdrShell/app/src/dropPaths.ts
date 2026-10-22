@@ -16,7 +16,7 @@ export async function handleDropPaths(drop: DropPaths, panes: readonly PaneContr
   const boxes = [...document.querySelectorAll<HTMLElement>(".pane[data-pane-id]")].filter(node => !node.closest("[hidden]")).map(node => ({ id: node.dataset.paneId!, rect: node.getBoundingClientRect() }));
   const id = paneAtDrop(boxes, drop);
   const pane = panes.find(pane => pane.info().pane_id === id);
-  // Also respect overlays: a desk, switcher or other surface is not a terminal.
+  // Also respect overlays: a switcher or other surface is not a terminal.
   const surface = document.elementFromPoint(drop.x, drop.y)?.closest<HTMLElement>(".pane[data-pane-id]");
   if (!pane || surface?.dataset.paneId !== id || !drop.paths.length) return { ok: true, pane_id: null };
   if (!pane.dropPaths) throw new Error("Terminal does not accept path drops");

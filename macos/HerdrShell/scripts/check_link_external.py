@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cmd+Shift+click on a terminal link or a desk web link opens the default browser.
+"""Cmd+Shift+click on a terminal link opens the default browser; a plain Cmd+click opens Aside.
 
 Run: python3 scripts/check_link_external.py   (writes checks/LINK-EXTERNAL.txt)
 
@@ -11,12 +11,11 @@ a file path. Clicks are real CGEvents posted by cua-driver in the guest with the
 keys held (foreground delivery, so macOS sees physical modifier state as for a hand on
 the keyboard). The OS boundary is real: the external opener is NSWorkspace in the guest,
 observed through the app's opened-link record (written just before NSWorkspace.open) and
-the guest's default browser process, and the desk is read back from the lab server.
+the guest's default browser process.
 """
 import json
 import os
 import pathlib
-import shlex
 import subprocess
 import sys
 import time
@@ -33,7 +32,6 @@ S.OUT = str(ROOT / "checks/LINK-EXTERNAL.txt")
 lines, failures = [], []
 OSC_URL = "https://example.com/osc8-external"
 PLAIN_URL = "https://example.com/plain-external"
-DESK_URL = "https://example.com/desk-cmd"
 FILE_PATH = "/tmp/herdr-link-external.txt"
 BROWSER = "Safari"
 
@@ -115,10 +113,6 @@ def app_window():
     return pid, win["window_id"]
 
 
-def desk_refs(tab):
-    return json.dumps(json.loads(S.lab("herdr", "desk", "list", "--tab", tab, "--json")))
-
-
 def real_click(pid, window, state, pane, col, row, mods):
     """One left click at a grid cell's centre, as CGEvents posted by cua-driver with `mods` held."""
     s = surface(state, pane)
@@ -170,7 +164,6 @@ def main():
           None not in (osc_row, plain_row, file_row), f"rows={osc_row},{plain_row},{file_row}")
     pid, window = app_window()
     quit_browser()
-    desk_before = desk_refs(tab)
     ran = []
 
     def external(name, row, want):
@@ -185,21 +178,12 @@ def main():
     external("Cmd+Shift+click on a plain URL opens it externally", plain_row, PLAIN_URL)
     check(f"the guest's default browser ({BROWSER}) ran after each external URL open", ran == [True, True], f"ran={ran}")
     external("Cmd+Shift+click on a file path opens it with the default app", file_row, "file://" + FILE_PATH)
-    check("no Cmd+Shift click changed the pane's desk", desk_refs(tab) == desk_before, desk_refs(tab)[:300])
-    state = wait(lambda s: s.get("docs_visible") is False, 2)
-    check("the desk column stayed closed", state.get("docs_visible") is False)
 
-    # Plain Cmd+click keeps today's behaviour: the link opens on the pane's desk.
     state = S.state()
     before = list(state.get("opened_urls", []))
     real_click(pid, window, state, pane, 2, osc_row, ("cmd",))
     opened = opened_after(before, 1)
-    check("plain Cmd+click on the OSC 8 label routes to the desk", opened == ["desk " + OSC_URL], f"opened={opened}")
-    deadline = time.monotonic() + 8
-    while OSC_URL not in desk_refs(tab) and time.monotonic() < deadline:
-        time.sleep(0.3)
-    check("the Cmd+clicked URL is on the pane's desk", OSC_URL in desk_refs(tab), desk_refs(tab)[:300])
-    desk_web(pid, window, tab)
+    check("plain Cmd+click on the OSC 8 label opens it in Aside", opened == ["aside " + OSC_URL], f"opened={opened}")
     S.cmd({"cmd": "shot", "out": str(ROOT / "checks/LINK-EXTERNAL.png")})
 
 
@@ -209,46 +193,6 @@ def window_pixel(state, rect, dx, dy):
     title = float(frame[3]) - state["content_height"]
     scale = state["backing_scale"]
     return round((rect[0] + dx) * scale), round((title + rect[1] + dy) * scale)
-
-
-def desk_web(pid, window, tab):
-    """A desk page's same-host link navigates the desk on a plain click and opens the
-    default browser on Cmd+Shift+click, leaving the desk on its page."""
-    port = 8765
-    page = f"http://127.0.0.1:{port}/index.html"
-    nxt = f"http://127.0.0.1:{port}/next.html"
-    # One link fills the top of the page, so a click near the page's corner lands on it.
-    body = "<a href=/next.html style='display:block;height:300px;font-size:40px'>NEXTLINK</a>"
-    S.space("exec", "mkdir -p /tmp/lx-web && printf '%s' " + shlex.quote(body) + " > /tmp/lx-web/index.html"
-            " && printf '%s' '<h1>next page</h1>' > /tmp/lx-web/next.html"
-            " && (test -f /tmp/lx-web.pid && kill $(cat /tmp/lx-web.pid) 2>/dev/null; true)"
-            f" && (nohup python3 -m http.server {port} --bind 127.0.0.1 --directory /tmp/lx-web"
-            " >/dev/null 2>&1 & echo $! > /tmp/lx-web.pid) && sleep 1")
-    S.lab("herdr", "desk", "open", "--tab", tab, page)
-    state = wait(lambda s: (s.get("docs") or {}).get("url") == page and "NEXTLINK" in (s.get("docs") or {}).get("text", ""), 15)
-    check("desk shows the local web page", "NEXTLINK" in (state.get("docs") or {}).get("text", ""),
-          json.dumps(state.get("docs"))[:300])
-    rect = (state.get("docs") or {}).get("web_rect") or []
-    check("desk page has a frame in the window", len(rect) == 4 and rect[2] > 100, f"web_rect={rect}")
-    if len(rect) != 4:
-        return
-    x, y = window_pixel(state, rect, 60, 60)
-    before = list(S.state().get("opened_urls", []))
-    driver(("get_window_state", {"pid": pid, "window_id": window, "include_screenshot": True}),
-           ("click", {"pid": pid, "window_id": window, "x": x, "y": y,
-                      "modifier": ["cmd", "shift"], "delivery_mode": "foreground"}))
-    opened = opened_after(before, 1)
-    check("Cmd+Shift+click on a desk page link opens it externally", opened == [nxt], f"opened={opened}")
-    state = S.state()
-    check("the desk stayed on its page", (state.get("docs") or {}).get("url") == page,
-          (state.get("docs") or {}).get("url", ""))
-    check(f"{BROWSER} ran for the desk link", restore_front())
-    driver(("get_window_state", {"pid": pid, "window_id": window, "include_screenshot": True}),
-           ("click", {"pid": pid, "window_id": window, "x": x, "y": y, "delivery_mode": "foreground"}))
-    state = wait(lambda s: (s.get("docs") or {}).get("url") == nxt, 8)
-    check("a plain click on the same link navigates the desk", (state.get("docs") or {}).get("url") == nxt,
-          (state.get("docs") or {}).get("url", ""))
-    S.space("exec", "kill $(cat /tmp/lx-web.pid) 2>/dev/null; rm -f /tmp/lx-web.pid; true")
 
 
 if __name__ == "__main__":

@@ -43,7 +43,7 @@ describe("control-pipe terminal gestures", () => {
     vi.spyOn(bridge, "api").mockResolvedValue({});
     host = document.createElement("div"); document.body.append(host); root = createRoot(host);
     await act(async () => root.render(<>{["focused", "other"].map(id => <PaneTerm key={id} pane={{ pane_id: id, terminal_id: id, workspace_id: "w", tab_id: "t" }} machine="studio" focused={id === "focused"} onFocus={() => {}} shortcut={() => false} register={register} />)}</>));
-    stop = installControl(() => ({ machine: { name: "studio", state: "up" }, machines: [], selected: "t", docs: { open: false, items: [], active: null }, rows: [], panes: [...panes.values()], focused: panes.get("focused"), chooseMachine: () => ({ name: "studio", state: "up" }), open: () => {}, action: async () => {} } satisfies ControlState));
+    stop = installControl(() => ({ machine: { name: "studio", state: "up" }, machines: [], selected: "t", rows: [], panes: [...panes.values()], focused: panes.get("focused"), chooseMachine: () => ({ name: "studio", state: "up" }), open: () => {}, action: async () => {} } satisfies ControlState));
     await write("focused", "https://example.com");
     await write("other", "other pane");
   });

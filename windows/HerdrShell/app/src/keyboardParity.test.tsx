@@ -24,7 +24,7 @@ const chords = [
   ["ctrl+alt+j", "agent_list_up"], ["ctrl+alt+k", "agent_list_down"], ["ctrl+shift+o", "attention_jump"], ["ctrl+shift+k", "search"], ["ctrl+shift+g", "goto"],
   ["ctrl+alt+m", "move_pane_mode"], ["ctrl+tab", "next_tab"], ["ctrl+shift+tab", "prev_tab"], ["ctrl+b", "toggle_sidebar"],
   ...Array.from({ length: 9 }, (_, i) => [`ctrl+${i + 1}`, `select_tab_${i + 1}`]),
-  ["ctrl+shift+[", "prev_machine"], ["ctrl+shift+]", "next_machine"], ["ctrl+shift+t", "new_tab"], ["ctrl+shift+w", "close_pane"], ["ctrl+shift+z", "zoom_pane"], ["ctrl+shift+p", "switcher"], ["ctrl+shift+a", "next_attention"], ["ctrl+shift+d", "toggle_docs"],
+  ["ctrl+shift+[", "prev_machine"], ["ctrl+shift+]", "next_machine"], ["ctrl+shift+t", "new_tab"], ["ctrl+shift+w", "close_pane"], ["ctrl+shift+z", "zoom_pane"], ["ctrl+shift+p", "switcher"], ["ctrl+shift+a", "next_attention"],
   ["alt+shift+=", "split_right"], ["alt+shift+-", "split_down"], ["alt+arrowleft", "focus_pane_left"], ["alt+arrowright", "focus_pane_right"], ["alt+arrowup", "focus_pane_up"], ["alt+arrowdown", "focus_pane_down"], ["f2", "rename_tab"],
 ];
 // Golden chord table exercises browser and control-pipe input, including shifted glyphs.

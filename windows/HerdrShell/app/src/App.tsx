@@ -18,9 +18,6 @@ import TabView from "./TabView";
 import FactoryPage from "./FactoryView";
 import Settings from "./Settings";
 import DetailPanel, { useDetailPanel } from "./DetailPanel";
-import DocPanel, { useDocs } from "./DocPanel";
-import { useDesk } from "./docs";
-import type { DocsState } from "./docs";
 import type { PaneController } from "./PaneTerm";
 import { installPathDrops } from "./dropPaths";
 import { installControl } from "./control";
@@ -183,37 +180,12 @@ function MachineView({ attentionTrails, machine, machines, snapshot, snapshots, 
     const timer = setTimeout(() => setPendingPins(value => ({ ...value })), PENDING_LIFETIME_MS - (Date.now() - Math.min(...entries.map(e => e!.at))));
     return () => clearTimeout(timer);
   }, [snapshot, pendingPins]);
-  const docsKey = `herdr-shell.docs.${machine.name}.${selected}`;
-  const [docsShown, setDocsShown] = useState<Record<string, boolean>>({});
-  const storedDocs = () => { try { return localStorage.getItem(docsKey) === "true"; } catch { return false; } };
-  const docsOpen = selected !== null && (docsShown[docsKey] ?? storedDocs());
-  const { items: catalogDocs, error: docsError } = useDocs(machine.name, selected, snapshot, docsOpen);
-  const showDesk = (tab: string) => {
-    const key = `herdr-shell.docs.${machine.name}.${tab}`;
-    setDocsShown(value => ({ ...value, [key]: true }));
-    try { localStorage.setItem(key, "true"); } catch (error) { showError(error); }
-  };
-  const { items: docsItems, active: activeDoc, select: selectDoc } = useDesk(machine.name, selected, snapshot, catalogDocs, showDesk);
-  useEffect(() => {
-    const opened = (event: Event) => { const detail = (event as CustomEvent<{ machine: string; tab: string }>).detail; if (detail.machine === machine.name) showDesk(detail.tab); };
-    window.addEventListener("herdr-desk-opened", opened);
-    return () => window.removeEventListener("herdr-desk-opened", opened);
-  }, [machine.name]);
-  const docs: DocsState = { open: docsOpen, items: docsItems.map(item => item.name), active: docsItems.find(item => (item.id ?? item.name) === activeDoc)?.name ?? null };
-  const state = useRef({ machine, machines, snapshot, selected, focused, rows, docs, docsKey, docsShown });
-  state.current = { machine, machines, snapshot, selected, focused, rows, docs, docsKey, docsShown };
+  const state = useRef({ machine, machines, snapshot, selected, focused, rows });
+  state.current = { machine, machines, snapshot, selected, focused, rows };
   const select = useCallback((id: string, stepping = false) => {
     navigationRef.current.noteSelection(stepping);
     if (!state.current.snapshot.tabs?.some(t => t.tab_id === id)) throw new Error(`Unknown tab: ${id}`);
     // Update the control target immediately, before React commits the new view.
-    if (state.current.selected !== id) {
-      const current = state.current;
-      const key = `herdr-shell.docs.${current.machine.name}.${id}`;
-      let open = current.docsShown[key];
-      if (open === undefined) { try { open = localStorage.getItem(key) === "true"; } catch { open = false; } }
-      current.docsKey = key;
-      current.docs = { open, items: [], active: null };
-    }
     state.current.selected = id;
     state.current.focused = null;
     onSelection(state.current.machine.name, id);
@@ -251,16 +223,6 @@ function MachineView({ attentionTrails, machine, machines, snapshot, snapshots, 
     if (name === "next_machine" || name === "prev_machine") {
       const next = cycleMachine(current.machines.map(m => m.name), current.machine.name, name === "next_machine" ? 1 : -1);
       if (next) chooseMachine(next);
-      return Promise.resolve();
-    }
-    if (name === "toggle_docs") {
-      if (current.selected) {
-        const open = !current.docs.open;
-        current.docs = { ...current.docs, open };
-        current.docsShown = { ...current.docsShown, [current.docsKey]: open };
-        setDocsShown(value => ({ ...value, [current.docsKey]: open }));
-        try { localStorage.setItem(current.docsKey, String(open)); } catch (error) { showError(error); }
-      }
       return Promise.resolve();
     }
     return runAction(name as Action, {
@@ -306,7 +268,7 @@ function MachineView({ attentionTrails, machine, machines, snapshot, snapshots, 
   control.current = () => {
     const current = state.current;
     const panes = [...controllers.current.values()].filter(p => current.snapshot.panes?.some(info => info.pane_id === p.info().pane_id && info.tab_id === current.selected));
-    return { paneDrag: paneDrag.current, machine: current.machine, machines: current.machines, chooseMachine, selected: current.selected, rows: current.rows, docs: current.docs, panes, focused: panes.find(p => p.info().pane_id === current.focused), open: select, openDetail: (id, paneId) => {
+    return { paneDrag: paneDrag.current, machine: current.machine, machines: current.machines, chooseMachine, selected: current.selected, rows: current.rows, panes, focused: panes.find(p => p.info().pane_id === current.focused), open: select, openDetail: (id, paneId) => {
       const tab = paneId ? current.snapshot.panes?.find(p => p.pane_id === paneId)?.tab_id
         : current.snapshot.tabs?.find(t => t.tab_id === id || ["agent:", "pinned:", "tab:", "focus:", "parked:"].some(prefix => prefix + t.tab_id === id))?.tab_id;
       if (!tab) throw new Error("No detail row");
@@ -332,5 +294,5 @@ function MachineView({ attentionTrails, machine, machines, snapshot, snapshots, 
       showError(error);
     });
   }, [showError]);
-  return <div className="layout"><div className={`title-strip ${sidebarVisible ? "over-sidebar" : ""}`}><UpdatePill /></div>{sidebarVisible && <Sidebar openDetail={detailPanel.toggle} navigation={navigation} paneDropRow={paneDragState?.zone?.kind === "into_tab" ? `tab:${paneDragState.zone.tab_id}` : paneDragState?.zone?.kind === "new_tab_in" ? `space:${paneDragState.zone.workspace_id}` : null} snapshot={snapshot} catalog={catalog} remotes={remotes} selectRemote={selectRemote} overlay={overlay} hosts={hosts} rows={rows} selected={selected} revealed={revealed} machine={machine} notice={notice?.text ?? null} select={select} pin={pin} movePin={movePin} renaming={renaming} startRename={id => { setRenaming(id); }} cancelRename={() => setRenaming(null)} commitRename={async (id, label) => { try { await action("rename_tab", label, id); setRenaming(null); const pane = state.current.focused; if (pane) controllers.current.get(pane)?.focus(); } catch { /* runAction reports through the transient status notice. */ } }} />}{detailPanel.rowId && <DetailPanel snapshot={snapshot} rowId={detailPanel.rowId} openFull={id => { detailPanel.close(); select(id); }} />}{factoryOpen && <FactoryPage machine={machine.name} online={machine.state === "up"} />}<div className="factory-pane-host" hidden={factoryOpen}><TabView onSpring={select} online={machine.state === "up"} registerDrag={registerDrag} onDragChange={setPaneDragState} snapshot={snapshot} selected={selected} machine={machine.name} focused={switcherOpen || renaming ? null : focused} onFocus={focus} shortcut={shortcut} register={register} pin={pin} onError={showError} /></div>{!factoryOpen && docsOpen && docsItems.length > 0 && <DocPanel key={docsKey} machine={machine.name} tab={selected} items={docsItems} active={activeDoc} select={selectDoc} error={docsError} close={() => { setDocsShown(value => ({ ...value, [docsKey]: false })); try { localStorage.setItem(docsKey, "false"); } catch (error) { showError(error); } }} />}{switcherOpen && <Switcher presentation={queryPresentation} query={switcherQuery} changeQuery={setSwitcherQuery} selectQuery={selectQuery} rows={rows} selected={selected} machine={machine.name} open={select} close={closeSwitcher} />}{!sidebarVisible && (notice || machine.state !== "up") && <div className="machine-error notice" role="status">{notice?.text ?? machine.error ?? machine.state}</div>}{settingsOpen && <Settings machine={machine.name} snapshot={snapshot} cards={cards} onError={showError} close={() => { setSettingsOpen(false); const pane = state.current.focused; if (pane) controllers.current.get(pane)?.focus(); }} />}</div>;
+  return <div className="layout"><div className={`title-strip ${sidebarVisible ? "over-sidebar" : ""}`}><UpdatePill /></div>{sidebarVisible && <Sidebar openDetail={detailPanel.toggle} navigation={navigation} paneDropRow={paneDragState?.zone?.kind === "into_tab" ? `tab:${paneDragState.zone.tab_id}` : paneDragState?.zone?.kind === "new_tab_in" ? `space:${paneDragState.zone.workspace_id}` : null} snapshot={snapshot} catalog={catalog} remotes={remotes} selectRemote={selectRemote} overlay={overlay} hosts={hosts} rows={rows} selected={selected} revealed={revealed} machine={machine} notice={notice?.text ?? null} select={select} pin={pin} movePin={movePin} renaming={renaming} startRename={id => { setRenaming(id); }} cancelRename={() => setRenaming(null)} commitRename={async (id, label) => { try { await action("rename_tab", label, id); setRenaming(null); const pane = state.current.focused; if (pane) controllers.current.get(pane)?.focus(); } catch { /* runAction reports through the transient status notice. */ } }} />}{detailPanel.rowId && <DetailPanel snapshot={snapshot} rowId={detailPanel.rowId} openFull={id => { detailPanel.close(); select(id); }} />}{factoryOpen && <FactoryPage machine={machine.name} online={machine.state === "up"} />}<div className="factory-pane-host" hidden={factoryOpen}><TabView onSpring={select} online={machine.state === "up"} registerDrag={registerDrag} onDragChange={setPaneDragState} snapshot={snapshot} selected={selected} machine={machine.name} focused={switcherOpen || renaming ? null : focused} onFocus={focus} shortcut={shortcut} register={register} pin={pin} onError={showError} /></div>{switcherOpen && <Switcher presentation={queryPresentation} query={switcherQuery} changeQuery={setSwitcherQuery} selectQuery={selectQuery} rows={rows} selected={selected} machine={machine.name} open={select} close={closeSwitcher} />}{!sidebarVisible && (notice || machine.state !== "up") && <div className="machine-error notice" role="status">{notice?.text ?? machine.error ?? machine.state}</div>}{settingsOpen && <Settings machine={machine.name} snapshot={snapshot} cards={cards} onError={showError} close={() => { setSettingsOpen(false); const pane = state.current.focused; if (pane) controllers.current.get(pane)?.focus(); }} />}</div>;
 }

@@ -127,9 +127,7 @@ pub struct TabInfo {
     #[serde(default)]
     pub sort_rank: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub desk: Option<super::desk::DeskInfo>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub doc: Option<super::desk::TabDoc>,
+    pub doc: Option<TabDoc>,
     pub tab_id: String,
     pub workspace_id: String,
     pub number: usize,
@@ -212,4 +210,33 @@ pub(crate) fn invalid_role_request(line: &str) -> bool {
                     .get("role")
                     .is_some_and(|role| !role.is_null() && role != "agent")
         })
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TabDocTarget {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TabDoc {
+    pub url: String,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub set_by: Option<String>,
+    #[serde(default)]
+    pub set_at_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TabDocSetParams {
+    #[serde(flatten)]
+    pub target: TabDocTarget,
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub set_by: Option<String>,
 }

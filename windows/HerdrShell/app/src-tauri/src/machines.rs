@@ -40,7 +40,6 @@ const LIFECYCLE: &[&str] = &[
     "pane.exited",
     "pane.agent_detected",
     "layout.updated",
-    "desk.changed",
 ];
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Deserialize, Serialize)]
@@ -682,68 +681,21 @@ mod tests {
         let mut excluded = BTreeSet::new();
         assert_eq!(
             rejected_event(
-                "subscription rejected: unknown variant `desk.changed`, expected tab.created",
+                "subscription rejected: unknown variant `layout.updated`, expected tab.created",
                 &excluded
             ),
-            Some("desk.changed".into())
+            Some("layout.updated".into())
         );
-        excluded.insert("desk.changed".into());
+        excluded.insert("layout.updated".into());
         for reason in [
-            "unknown variant `desk.changed`",
+            "unknown variant `layout.updated`",
             "unknown variant `not.a.lifecycle`",
-            "unknown variant `desk.changed",
+            "unknown variant `layout.updated",
             "connection reset",
             "permission denied",
         ] {
             assert_eq!(rejected_event(reason, &excluded), None, "{reason}");
         }
-    }
-    // A real older-server boundary rejects desk.changed, then accepts the
-    // replacement subscription without losing the remaining lifecycle events.
-    #[cfg(unix)]
-    #[test]
-    fn older_server_retries_without_unknown_event() -> Result<(), Box<dyn std::error::Error>> {
-        use std::io::{BufRead, BufReader, Write};
-        use std::os::unix::net::UnixListener;
-        let path = std::env::temp_dir().join(format!("desk-retry-{}.sock", std::process::id()));
-        let listener = UnixListener::bind(&path)?;
-        let server = std::thread::spawn(move || -> Result<(), String> {
-            for attempt in 0..2 {
-                let (mut stream, _) = listener.accept().map_err(|e| e.to_string())?;
-                stream
-                    .set_read_timeout(Some(Duration::from_secs(5)))
-                    .map_err(|e| e.to_string())?;
-                let mut line = String::new();
-                BufReader::new(&mut stream)
-                    .read_line(&mut line)
-                    .map_err(|e| e.to_string())?;
-                let request: Value = serde_json::from_str(&line).map_err(|e| e.to_string())?;
-                let subscriptions = request["params"]["subscriptions"]
-                    .as_array()
-                    .ok_or("missing subscriptions")?;
-                let desk = subscriptions.iter().any(|v| v["type"] == "desk.changed");
-                if desk != (attempt == 0)
-                    || !subscriptions.iter().any(|v| v["type"] == "tab.created")
-                {
-                    return Err("wrong retry subscriptions".into());
-                }
-                let reply = if attempt == 0 {
-                    json!({"error":{"message":"unknown variant `desk.changed`, expected tab.created"}})
-                } else {
-                    json!({"result":{"type":"subscription_started"}})
-                };
-                writeln!(stream, "{reply}").map_err(|e| e.to_string())?;
-            }
-            Ok(())
-        });
-        let result = (|| -> Result<(), Box<dyn std::error::Error>> {
-            let subscription = Subscription::open(&Endpoint::from_path(&path), &BTreeSet::new())?;
-            drop(subscription);
-            server.join().map_err(|_| "retry server panicked")??;
-            Ok(())
-        })();
-        fs::remove_file(path)?;
-        result
     }
     // Real local-socket boundary covers subscription ack/event framing and dropping
     // an idle stream, independently of the TCP-only predecessor and pure config tests.

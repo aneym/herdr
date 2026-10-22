@@ -9,7 +9,7 @@ describe("Windows shell bindings", () => {
   const cases: [string, Partial<KeyEvent>, Action][] = [
     ["[", shifted, "prev_machine"], ["{", shifted, "prev_machine"], ["]", shifted, "next_machine"], ["}", shifted, "next_machine"],
     ["å", { ...shifted, code: "BracketLeft" }, "prev_machine"], ["¨", { ...shifted, code: "BracketRight" }, "next_machine"],
-    ["T", shifted, "new_tab"], ["w", shifted, "close_pane"], ["Z", shifted, "zoom_pane"], ["P", shifted, "switcher"], ["A", shifted, "next_attention"], ["D", shifted, "toggle_docs"],
+    ["T", shifted, "new_tab"], ["w", shifted, "close_pane"], ["Z", shifted, "zoom_pane"], ["P", shifted, "switcher"], ["A", shifted, "next_attention"],
     ["=", split, "split_right"], ["+", split, "split_right"], ["-", split, "split_down"], ["_", split, "split_down"],
     ["ArrowLeft", alt, "focus_pane_left"], ["ArrowRight", alt, "focus_pane_right"], ["ArrowUp", alt, "focus_pane_up"], ["ArrowDown", alt, "focus_pane_down"],
     ["F2", {}, "rename_tab"], ["b", ctrl, "toggle_sidebar"], ["Tab", ctrl, "next_tab"], ["Tab", shifted, "prev_tab"],

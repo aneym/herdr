@@ -301,7 +301,7 @@ def main():
           bool(wait_for(lambda: S.state().get("shell", {}).get("factory_open") is False)))
     covered.add("open_factory")
     covered.update(f"goto_space_{n}" for n in range(1, 10))   # result asserted by check_p10.py (P10)
-    covered.update(["toggle_area_mode", "toggle_docs"] + [f"filter_{n}" for n in range(1, 7)])  # check_p15 / check_p16
+    covered.update(["toggle_area_mode"] + [f"filter_{n}" for n in range(1, 7)])  # check_p15
     live = {e["action"] for e in keymap["entries"] if not e.get("pending")}
     check("every live keymap action has a result check above", live <= covered, f"unchecked={sorted(live - covered)}")
 
@@ -337,7 +337,6 @@ def main():
         if not ok:
             bad.append((e["chord"], "fired=" + repr(fired)))
     reset()
-    S.cmd({"cmd": "docs", "open": False})
     time.sleep(0.5)
     after_all = all_panes(every_pane)
     check(f"all {len(keymap['entries'])} keymap entries fire exactly their own action (app log)", not bad,
