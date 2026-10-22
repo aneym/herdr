@@ -51,6 +51,31 @@ fn main() {
     );
 
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .args(args)
+            .current_dir(&manifest_dir)
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .and_then(|output| String::from_utf8(output.stdout).ok())
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    };
+    let revision = env::var("HERDR_BUILD_COMMIT")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| git(&["rev-parse", "--short=9", "HEAD"]))
+        .unwrap_or_else(|| "unknown".into());
+    println!("cargo:rustc-env=HERDR_GIT_SHA={}", revision.trim());
+    let head = git(&["symbolic-ref", "-q", "HEAD"]).unwrap_or_default();
+    for reference in ["HEAD", "packed-refs", head.as_str()] {
+        if !reference.is_empty() {
+            if let Some(path) = git(&["rev-parse", "--git-path", reference]) {
+                println!("cargo:rerun-if-changed={path}");
+            }
+        }
+    }
     let vendored_dir = manifest_dir.join("vendor/libghostty-vt");
     let optimize = env::var("LIBGHOSTTY_VT_OPTIMIZE").unwrap_or_else(|_| "ReleaseFast".into());
     let simd = env_bool("LIBGHOSTTY_VT_SIMD").unwrap_or(true);

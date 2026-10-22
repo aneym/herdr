@@ -25,7 +25,6 @@ mod config;
 mod copy_mode;
 mod detect;
 mod events;
-// Parse, panel and path helpers are read by the server poll and detail panel pieces.
 #[allow(dead_code)]
 mod factory_overlay;
 mod ghostty;
@@ -770,7 +769,11 @@ fn main() -> io::Result<()> {
 
     if args.iter().any(|a| a == "--version" || a == "-V") {
         platform::begin_cli_output();
-        println!("herdr {}", crate::build_info::version());
+        println!(
+            "herdr {} ({})",
+            build_info::version(),
+            env!("HERDR_GIT_SHA")
+        );
         return Ok(());
     }
 
@@ -786,7 +789,6 @@ fn main() -> io::Result<()> {
         return Ok(());
     }
 
-    // Reject unknown flags
     let known_flags = [
         "--session",
         "--machine",
