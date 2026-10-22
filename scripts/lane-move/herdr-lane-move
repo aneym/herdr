@@ -14,6 +14,9 @@ lane dir, open a tab on the target's herdr and run `claude --resume <sid>`
 there, then wait for the resumed chat to answer. On success the source is
 marked: HANDOFF.md in the lane dir gets a "moved" line, the source tab is
 renamed "<label> -> <host>", ~/.agent-rails/herdr/lane-moves.jsonl gets a row.
+A lane's lane.json then names the box pane, `host`, `box_ssh` and `box_lane_dir`, so
+lane-post wakes the box lead and open-factory's lane-pullback job copies the
+box lane dir back to the source every 60 s.
 
 Fallback (resume failed, or --handoff): the source appends a short handoff
 (goal, state, next step, open asks, last turns) to the lane's HANDOFF.md, the
@@ -373,6 +376,39 @@ def append(path, text):
         f.write(text if text.endswith("\n") else text + "\n")
 
 
+def pane_lane(pane):
+    for name in sorted(os.listdir(LANES)) if os.path.isdir(LANES) else []:
+        try:
+            with open(os.path.join(LANES, name, "lane.json"), encoding="utf-8") as f:
+                record = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if isinstance(record, dict) and (record.get("herdr") or {}).get("pane_id") == pane:
+            return name
+    return None
+
+
+def record_lane(lane_dir, dst, pane, dst_lane_dir):
+    path = os.path.join(lane_dir, "lane.json")
+    if not os.path.isfile(path):
+        return None
+    with open(path, encoding="utf-8") as f:
+        record = json.load(f)
+    info = herdr_json(dst, f"pane get {shlex.quote(pane)}").get("pane", {})
+    herdr = record.get("herdr") if isinstance(record.get("herdr"), dict) else {}
+    herdr.update({"pane_id": pane, "tab_id": info.get("tab_id"), "workspace": pane.split(":", 1)[0]})
+    resolved = subprocess.run(["ssh", "-G", dst], capture_output=True, text=True).stdout
+    name = next((l.split()[1] for l in resolved.splitlines() if l.startswith("hostname ")), dst)
+    host = dst if re.fullmatch(r"[0-9.]+", name) else name.split(".")[0]
+    record.update({"herdr": herdr, "host": host, "box_ssh": dst, "box_lane_dir": dst_lane_dir})
+    record.pop("hosted_on", None)
+    tmp = f"{path}.lane-move.{os.getpid()}"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(record, f, indent=2)
+    os.replace(tmp, path)
+    return herdr
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     src = ap.add_mutually_exclusive_group(required=True)
@@ -436,6 +472,8 @@ def main():
     m = re.match(re.escape(LANES) + r"/([^/]+)", src_cwd)
     if not lane and m:
         lane = m.group(1)
+    if not lane and a.pane:
+        lane = pane_lane(a.pane)
     lane_dir = os.path.join(LANES, lane) if lane else os.path.join(HOME, ".agent-rails", "lane-moves", sid[:8])
     flags = list(argv_flags)
     if a.model:
@@ -589,6 +627,7 @@ def main():
     append(os.path.join(lane_dir, "HANDOFF.md"), line)
     sh(dst, f"mkdir -p {shlex.quote(dst_lane_dir)} && cat >> {shlex.quote(dst_lane_dir + '/HANDOFF.md')}",
        input_text=line)
+    record["lane_json"] = record_lane(lane_dir, dst, pane, dst_lane_dir) if lane else None
     append(MOVES_LOG, json.dumps(record))
     if src_tab:
         sh(None, f"herdr tab rename {shlex.quote(src_tab)} "
