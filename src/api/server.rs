@@ -20,7 +20,8 @@ use crate::api::{request_changes_ui, socket_path, ApiRequestMessage, ApiRequestS
 use crate::ipc::{
     bind_private_local_listener, is_connection_closed_error, local_stream_peer_closed,
     poll_local_stream_read, remove_socket_file_if_owned, set_local_stream_polling,
-    socket_file_identity, LocalStream, LocalStreamRead, SocketFileIdentity,
+    socket_file_identity, wait_local_stream_readable, LocalStream, LocalStreamRead,
+    SocketFileIdentity,
 };
 
 #[cfg(test)]
@@ -920,13 +921,16 @@ fn read_initial_request_line_with_limits(
                 }
             }
             LocalStreamRead::Pending => {
-                if Instant::now() >= deadline {
+                let now = Instant::now();
+                if now >= deadline {
                     break Err(io::Error::new(
                         io::ErrorKind::TimedOut,
                         "timed out reading api request",
                     ));
                 }
-                std::thread::sleep(CONNECTION_POLL_INTERVAL);
+                if let Err(err) = wait_local_stream_readable(stream, deadline - now) {
+                    break Err(err);
+                }
             }
         }
     };

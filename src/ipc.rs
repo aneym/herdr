@@ -161,6 +161,38 @@ pub(crate) fn bind_private_local_listener(path: &Path) -> io::Result<LocalListen
     }
 }
 
+pub(crate) fn wait_local_stream_readable(
+    stream: &LocalStream,
+    timeout: std::time::Duration,
+) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::fd::{AsFd, AsRawFd};
+
+        let LocalStream::UdSocket(socket) = stream;
+        let mut fd = libc::pollfd {
+            fd: socket.as_fd().as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let millis = timeout.as_millis().clamp(1, libc::c_int::MAX as u128) as libc::c_int;
+        if unsafe { libc::poll(&mut fd, 1, millis) } < 0 {
+            let err = io::Error::last_os_error();
+            if err.kind() != io::ErrorKind::Interrupted {
+                return Err(err);
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    {
+        let _ = stream;
+        std::thread::sleep(timeout.min(std::time::Duration::from_millis(2)));
+        Ok(())
+    }
+}
+
 pub(crate) fn poll_local_stream_read(
     stream: &mut LocalStream,
     buf: &mut [u8],
