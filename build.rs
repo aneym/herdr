@@ -51,6 +51,36 @@ fn main() {
     );
 
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let revision = Command::new("git")
+        .args(["rev-parse", "--short=9", "HEAD"])
+        .current_dir(&manifest_dir)
+        .output()
+        .expect("failed to read build revision");
+    assert!(
+        revision.status.success(),
+        "failed to resolve build revision"
+    );
+    let revision = String::from_utf8(revision.stdout).expect("invalid build revision");
+    println!("cargo:rustc-env=HERDR_GIT_SHA={}", revision.trim());
+    let head = Command::new("git")
+        .args(["symbolic-ref", "-q", "HEAD"])
+        .current_dir(&manifest_dir)
+        .output()
+        .expect("failed to read HEAD reference");
+    let head = String::from_utf8(head.stdout).expect("invalid HEAD reference");
+    for reference in ["HEAD", "packed-refs", head.trim()] {
+        if reference.is_empty() {
+            continue;
+        }
+        let path = Command::new("git")
+            .args(["rev-parse", "--git-path", reference])
+            .current_dir(&manifest_dir)
+            .output()
+            .expect("failed to locate git reference");
+        assert!(path.status.success(), "failed to locate git reference");
+        let path = String::from_utf8(path.stdout).expect("invalid git reference path");
+        println!("cargo:rerun-if-changed={}", path.trim());
+    }
     let vendored_dir = manifest_dir.join("vendor/libghostty-vt");
     let optimize = env::var("LIBGHOSTTY_VT_OPTIMIZE").unwrap_or_else(|_| "ReleaseFast".into());
     let simd = env_bool("LIBGHOSTTY_VT_SIMD").unwrap_or(true);

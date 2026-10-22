@@ -770,7 +770,11 @@ fn main() -> io::Result<()> {
 
     if args.iter().any(|a| a == "--version" || a == "-V") {
         platform::begin_cli_output();
-        println!("herdr {}", crate::build_info::version());
+        println!(
+            "herdr {} ({})",
+            crate::build_info::version(),
+            env!("HERDR_GIT_SHA")
+        );
         return Ok(());
     }
 
