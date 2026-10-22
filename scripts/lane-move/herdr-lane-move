@@ -17,6 +17,9 @@ renamed "<label> -> <host>", ~/.agent-rails/herdr/lane-moves.jsonl gets a row.
 A lane's lane.json then names the box pane, `host`, `box_ssh` and `box_lane_dir`, so
 lane-post wakes the box lead and open-factory's lane-pullback job copies the
 box lane dir back to the source every 60 s.
+The Studio tab stays linked as herdr.source_tab_id. A lane whose home lane.json
+names this box's lane dir is moving home: its lane.json is not copied over, and
+the home copy drops host, box_ssh, box_lane_dir and source_tab_id.
 
 Fallback (resume failed, or --handoff): the source appends a short handoff
 (goal, state, next step, open asks, last turns) to the lane's HANDOFF.md, the
@@ -388,24 +391,50 @@ def pane_lane(pane):
     return None
 
 
-def record_lane(lane_dir, dst, pane, dst_lane_dir):
-    path = os.path.join(lane_dir, "lane.json")
-    if not os.path.isfile(path):
+def moving_home(dst, dst_lane_dir, lane_dir):
+    text = sh(dst, f"cat {shlex.quote(dst_lane_dir + '/lane.json')} 2>/dev/null", check=False).stdout
+    try:
+        record = json.loads(text)
+    except ValueError:
+        return False
+    return isinstance(record, dict) and record.get("box_lane_dir") == lane_dir
+
+
+def record_lane(lane_dir, dst, pane, dst_lane_dir, home):
+    path = os.path.join(dst_lane_dir if home else lane_dir, "lane.json")
+    if home:
+        text = sh(dst, f"cat {shlex.quote(path)}", check=False).stdout
+    elif os.path.isfile(path):
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+    else:
+        text = ""
+    if not text.strip():
         return None
-    with open(path, encoding="utf-8") as f:
-        record = json.load(f)
+    record = json.loads(text)
     info = herdr_json(dst, f"pane get {shlex.quote(pane)}").get("pane", {})
     herdr = record.get("herdr") if isinstance(record.get("herdr"), dict) else {}
+    if home:
+        herdr.pop("source_tab_id", None)
+        for key in ("host", "box_ssh", "box_lane_dir"):
+            record.pop(key, None)
+    else:
+        herdr.setdefault("source_tab_id", herdr.get("tab_id"))
+        resolved = subprocess.run(["ssh", "-G", dst], capture_output=True, text=True).stdout
+        name = next((l.split()[1] for l in resolved.splitlines() if l.startswith("hostname ")), dst)
+        host = dst if re.fullmatch(r"[0-9.]+", name) else name.split(".")[0]
+        record.update({"host": host, "box_ssh": dst, "box_lane_dir": dst_lane_dir})
+        record.pop("hosted_on", None)
     herdr.update({"pane_id": pane, "tab_id": info.get("tab_id"), "workspace": pane.split(":", 1)[0]})
-    resolved = subprocess.run(["ssh", "-G", dst], capture_output=True, text=True).stdout
-    name = next((l.split()[1] for l in resolved.splitlines() if l.startswith("hostname ")), dst)
-    host = dst if re.fullmatch(r"[0-9.]+", name) else name.split(".")[0]
-    record.update({"herdr": herdr, "host": host, "box_ssh": dst, "box_lane_dir": dst_lane_dir})
-    record.pop("hosted_on", None)
+    record["herdr"] = herdr
+    body = json.dumps(record, indent=2)
     tmp = f"{path}.lane-move.{os.getpid()}"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(record, f, indent=2)
-    os.replace(tmp, path)
+    if home:
+        sh(dst, f"cat > {shlex.quote(tmp)} && mv {shlex.quote(tmp)} {shlex.quote(path)}", input_text=body)
+    else:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(body)
+        os.replace(tmp, path)
     return herdr
 
 
@@ -501,6 +530,8 @@ def main():
     if a.dry_run:
         print(json.dumps({"dry_run": True, **plan}, indent=2))
         return
+    home = bool(lane) and moving_home(dst, dst_lane_dir, lane_dir)
+    lane_excl = ["--exclude", "/lane.json"] if home else []
     if lane_kb > a.lane_max_mb * 1024:
         die(f"lane dir {lane_dir} is {lane_kb // 1024} MB (> --lane-max-mb {a.lane_max_mb})")
 
@@ -565,7 +596,7 @@ def main():
     if os.path.isdir(os.path.join(src_key_dir, sid)):
         subprocess.run(rs + [os.path.join(src_key_dir, sid), f"{dst}:{dst_key_dir}/"], check=True)
     if os.path.isdir(lane_dir):
-        subprocess.run(rs + [lane_dir + "/", f"{dst}:{dst_lane_dir}/"], check=True)
+        subprocess.run(rs + lane_excl + [lane_dir + "/", f"{dst}:{dst_lane_dir}/"], check=True)
     say(f"copied transcript to {dst}:{dst_key_dir}/{sid}.jsonl; lane dir to {dst}:{dst_lane_dir}")
     trust = ensure_trust(dst, dst_cwd)
     say(f"trust for {dst_cwd} on {dst}: {trust}")
@@ -603,7 +634,7 @@ def main():
         # Fallback / --handoff: fresh chat reads HANDOFF.md.
         block = handoff_block(a.src_label, sid, facts, lane_dir, dst, pane)
         append(os.path.join(lane_dir, "HANDOFF.md"), block)
-        subprocess.run(rs + [lane_dir + "/", f"{dst}:{dst_lane_dir}/"], check=True)
+        subprocess.run(rs + lane_excl + [lane_dir + "/", f"{dst}:{dst_lane_dir}/"], check=True)
         handoff_path = f"{dst_lane_dir}/HANDOFF.md"
         new_sid = str(uuid.uuid4())
         instr = a.prompt or "then STATE.md if it exists, then continue."
@@ -627,7 +658,7 @@ def main():
     append(os.path.join(lane_dir, "HANDOFF.md"), line)
     sh(dst, f"mkdir -p {shlex.quote(dst_lane_dir)} && cat >> {shlex.quote(dst_lane_dir + '/HANDOFF.md')}",
        input_text=line)
-    record["lane_json"] = record_lane(lane_dir, dst, pane, dst_lane_dir) if lane else None
+    record["lane_json"] = record_lane(lane_dir, dst, pane, dst_lane_dir, home) if lane else None
     append(MOVES_LOG, json.dumps(record))
     if src_tab:
         sh(None, f"herdr tab rename {shlex.quote(src_tab)} "
