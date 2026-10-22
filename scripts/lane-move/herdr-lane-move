@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """herdr-lane-move: move a Claude chat (and its lane dir) to another machine.
 
-Runs on the source host. The target is an ssh alias (studio-ts, ax42, pc-wsl).
+Runs on the source host. The target is an ssh alias (studio, ax42, pc-wsl); a
+move to a Linux box first claims a slot with admit-claim (lane name, or tab
+label for a chat with no lane), on the --to box with --node, else on the box it
+grants. Exit 3 means queued: nothing moved. The target claude runs with
+LANE_HOST=<claim name> so the claim lasts as long as it does; a failed move
+releases the claim.
 
   herdr-lane-move --pane w1:p2 --to ax42            move a live, idle herdr pane
   herdr-lane-move --session <sid> --to ax42         move a finished session (no pane)
@@ -41,6 +46,7 @@ import signal
 import subprocess
 import sys
 import time
+import shutil
 import uuid
 
 HOME = os.path.expanduser("~")
@@ -50,6 +56,7 @@ PATH_PREFIX = "export PATH=$HOME/.local/bin:$PATH; "
 KEEP_FLAGS_WITH_VALUE = ("--model", "--effort", "--permission-mode", "--agent")
 KEEP_FLAGS_BARE = ("--dangerously-skip-permissions",)
 WAIT_CAP = 260  # every wait stays under 270 s
+CLAIM = []
 
 
 def default_label():
@@ -61,6 +68,8 @@ def default_label():
 
 
 def die(msg, code=2):
+    if CLAIM:
+        release_claim(CLAIM[0])
     print(f"herdr-lane-move: {msg}", file=sys.stderr)
     sys.exit(code)
 
@@ -400,6 +409,46 @@ def moving_home(dst, dst_lane_dir, lane_dir):
     return isinstance(record, dict) and record.get("box_lane_dir") == lane_dir
 
 
+def fleet_host(alias):
+    resolved = subprocess.run(["ssh", "-G", alias], capture_output=True, text=True).stdout
+    name = next((l.split()[1] for l in resolved.splitlines() if l.startswith("hostname ")), alias)
+    return alias if re.fullmatch(r"[0-9.]+", name) else name.split(".")[0]
+
+
+def admit_claim_bin():
+    return shutil.which("admit-claim") or os.path.join(HOME, ".agent-rails", "factory-runtime", "bin", "admit-claim")
+
+
+def claim_box(name, node, priority, max_wait):
+    argv = [admit_claim_bin(), "lane", name, "--priority", str(priority), "--max", str(int(max_wait)), "--json"]
+    if node:
+        argv += ["--node", node]
+    try:
+        p = subprocess.run(argv, capture_output=True, text=True, timeout=max_wait + 30)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        die(f"admit-claim did not answer: {e}")
+    lines = p.stdout.strip().splitlines()
+    try:
+        reply = json.loads(lines[-1]) if lines else {}
+    except ValueError:
+        reply = {}
+    if p.returncode == 3:
+        print(json.dumps({"queued": True, "claim": name, **(reply if isinstance(reply, dict) else {})}))
+        sys.exit(3)
+    if p.returncode or not isinstance(reply, dict) or not reply.get("node"):
+        die(f"admit-claim exited {p.returncode}: {(p.stderr or p.stdout).strip()[-300:]}")
+    CLAIM.append(name)
+    say(f"admit-claim granted {reply['node']} for {name} (job {reply.get('job')}, alloc {reply.get('alloc')})")
+    return reply["node"]
+
+
+def release_claim(name):
+    try:
+        subprocess.run([admit_claim_bin(), "release", name], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
 def record_lane(lane_dir, dst, pane, dst_lane_dir, home):
     path = os.path.join(dst_lane_dir if home else lane_dir, "lane.json")
     if home:
@@ -420,9 +469,7 @@ def record_lane(lane_dir, dst, pane, dst_lane_dir, home):
             record.pop(key, None)
     else:
         herdr.setdefault("source_tab_id", herdr.get("tab_id"))
-        resolved = subprocess.run(["ssh", "-G", dst], capture_output=True, text=True).stdout
-        name = next((l.split()[1] for l in resolved.splitlines() if l.startswith("hostname ")), dst)
-        host = dst if re.fullmatch(r"[0-9.]+", name) else name.split(".")[0]
+        host = fleet_host(dst)
         record.update({"host": host, "box_ssh": dst, "box_lane_dir": dst_lane_dir})
         record.pop("hosted_on", None)
     herdr.update({"pane_id": pane, "tab_id": info.get("tab_id"), "workspace": pane.split(":", 1)[0]})
@@ -443,7 +490,9 @@ def main():
     src = ap.add_mutually_exclusive_group(required=True)
     src.add_argument("--pane", help="local herdr pane running an idle/done claude")
     src.add_argument("--session", help="finished claude session id (no live process)")
-    ap.add_argument("--to", required=True, help="target ssh alias, e.g. ax42, studio-ts, pc-wsl")
+    ap.add_argument("--to", help="target ssh alias (ax42, forge-lanes, pc-wsl, studio); default: the box admit-claim grants")
+    ap.add_argument("--priority", type=int, default=50, help="admit-claim priority, 1-100")
+    ap.add_argument("--claim-wait", type=int, default=240, help=f"seconds admit-claim waits for an open box (max {WAIT_CAP})")
     ap.add_argument("--lane", help="lane name under ~/.agent-rails/lanes (default: from cwd)")
     ap.add_argument("--target-cwd", help="cwd on the target (default: mapped from the source cwd)")
     ap.add_argument("--workspace", default="lanes", help="target workspace id or label; created if missing")
@@ -461,6 +510,8 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
     dst = a.to
+    if a.dry_run and not dst:
+        die("--dry-run needs --to")
 
     # 1. Source facts.
     pid = None
@@ -513,6 +564,12 @@ def main():
         flags += ["--effort", a.effort]
     label = a.label or lane or src_tab_label or f"moved-{sid[:8]}"
 
+    node = fleet_host(dst) if dst else None
+    claim = re.sub(r"[^a-z0-9_-]+", "-", (lane or label).lower()).strip("-") or sid[:8]
+    if node != "studio" and not a.dry_run:
+        granted = claim_box(claim, node, a.priority, min(a.claim_wait, WAIT_CAP))
+        dst = dst or {"forge": "forge-lanes"}.get(granted, granted)
+    launch_env = f"LANE_HOST={claim} "
     dst_home = sh(dst, "echo $HOME").stdout.strip()
     dst_has_volumes = sh(dst, "test -d /Volumes/StudioExt/repos", check=False).returncode == 0
     dst_cwd = a.target_cwd or map_path(src_cwd, HOME, dst_home, dst_has_volumes)
@@ -612,7 +669,7 @@ def main():
     result = None
     if not a.handoff:
         instr = a.prompt or f"Read {dst_lane_dir}/STATE.md if it exists, then continue."
-        cmd = shlex.join(["claude", "--resume", sid] + flags + [f"{preamble} {instr}"])
+        cmd = launch_env + shlex.join(["claude", "--resume", sid] + flags + [f"{preamble} {instr}"])
         t0 = time.time()
         sh(dst, f"herdr pane run {shlex.quote(pane)} {shlex.quote(cmd)}")
         say(f"launched resume on {dst}:{pane}; waiting up to {min(a.wait, WAIT_CAP)}s for an answer")
@@ -640,7 +697,7 @@ def main():
         instr = a.prompt or "then STATE.md if it exists, then continue."
         kick = (f"Handed off from {a.src_label}:{sid}. {preamble} Read {handoff_path} first "
                 f"(its last section is this handoff), {instr}")
-        cmd = shlex.join(["claude", "--session-id", new_sid] + flags + [kick])
+        cmd = launch_env + shlex.join(["claude", "--session-id", new_sid] + flags + [kick])
         t0 = time.time()
         sh(dst, f"herdr pane run {shlex.quote(pane)} {shlex.quote(cmd)}")
         say(f"launched handoff chat {new_sid} on {dst}:{pane}")
