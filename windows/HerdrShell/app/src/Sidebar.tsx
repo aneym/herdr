@@ -23,6 +23,7 @@ import type { RemoteMachine } from "./machines";
 import { foldAllSpaces, foldKey, noteSelection, pinCount, revealOnSelect, spaceOpen } from "./model";
 import type { RevealMemo, SidebarRow } from "./model";
 import { newPanes } from "./newPanes";
+import AutomationsSection from "./AutomationsSection";
 /** The machine running a chat from another machine: an icon and its short name, quiet after the
  *  title, as the Mac's SpacesRowView badge. An unreachable machine dims it and says so on hover. */
 function MachineBadge({ row }: { row: SidebarRow }) {
@@ -352,6 +353,7 @@ export default function Sidebar({ thoughts, navigation, snapshot = {}, catalog =
       <button data-row="hiddenagents" className="sidebar-row muted hidden-agents" aria-expanded={hiddenAgents} onClick={() => { setHiddenAgents(!hiddenAgents); save("hiddenAgents", !hiddenAgents); }}><span>Hidden</span><span>{items.filter(r => r.hidden).length}</span>{!hiddenAgents && items.some(r => r.hidden && (r.status === "blocked" || r.request != null)) && <span className="hidden-agents-dot" data-dot="accent" />}<span className="chevron"><Chevron open={hiddenAgents} /></span></button>
       {hiddenAgents && items.filter(r => r.hidden).map(r => tabRow(r))}
     </>}</section> : null; })}
+    <AutomationsSection automations={snapshot.automations ?? []} />
     {choices.length > 0 && <div className="sidebar-row goal-row" data-row="goal">
       <span className="muted">goal</span>
       <button className="goal-pick" aria-haspopup="menu" aria-expanded={!!goalMenu} onClick={event => { const r = event.currentTarget.getBoundingClientRect(); setGoalMenu(goalMenu ? null : { x: r.left, y: r.bottom }); }}>{goalFilter?.replace(":", " · ") ?? "All"}<Chevron open={!!goalMenu} /></button>

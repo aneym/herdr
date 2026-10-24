@@ -254,6 +254,10 @@ footer { color: var(--shell-muted); padding: var(--shell-space-step12) var(--she
 .space-section.is-group { font-weight: 400; letter-spacing: 0; text-transform: none; }
 .space-section:not([aria-expanded]):hover { background: none; }
 .space-section-count { margin-left: auto; font-variant-numeric: tabular-nums; }
+.automations-section { margin-top: var(--shell-space-step14); }
+.automation-row { cursor: pointer; }
+.automation-trailing { margin-left: auto; flex-shrink: 0; font-size: var(--shell-type-row-trailing); }
+.automation-detail { display: block; padding-left: calc(var(--shell-space-step24) + var(--shell-space-step12)); color: var(--shell-muted); font-size: var(--shell-type-row-trailing); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nested .indented { padding-left: calc(var(--shell-space-step24) + var(--shell-space-step12)); }
 .sidebar-hosts { padding: 0 0 var(--shell-space-step8); }
 .host-row { gap: var(--shell-space-step8); font-weight: 400; cursor: default; }
