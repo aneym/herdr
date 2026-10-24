@@ -51,7 +51,8 @@ def manifest_paths(source_root: Path, cache_dir: Path) -> list[Path]:
 
 
 def cached(cache_dir: Path, expected_hash: str) -> bool:
-    return (cache_dir / "p" / expected_hash).is_dir()
+    package = cache_dir / "p" / expected_hash
+    return package.is_dir() or package.with_name(f"{expected_hash}.tar.gz").is_file()
 
 
 def run(command: list[str], *, cwd: Path | None = None, capture: bool = False) -> str:
