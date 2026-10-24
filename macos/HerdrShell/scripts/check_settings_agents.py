@@ -28,18 +28,12 @@ def check(name, ok, detail=''):
 
 with tempfile.TemporaryDirectory(prefix='settings-agents-') as directory:
     driver = pathlib.Path(directory) / 'dump'
-    sources = ['SpacesTree.swift', 'MachineMerge.swift', 'AgentCards.swift', 'SettingsAgents.swift']
+    sources = ['SpacesTree.swift', 'MachineMerge.swift', 'SettingsAgents.swift']
     subprocess.run(['swiftc', *[str(ROOT / 'Sources/HerdrShell' / s) for s in sources],
                     str(ROOT / 'scripts/settings_agents_dump.swift'), '-o', str(driver)], check=True)
 
-    agents = pathlib.Path(directory) / 'agents'
-    for card in json.loads(FIXTURE.read_text())['cards']:
-        (agents / card['dir']).mkdir(parents=True)
-        (agents / card['dir'] / 'agent.json').write_text(json.dumps(card['agent']))
-
     def dump(fixture):
         path = pathlib.Path(directory) / 'fixture.json'
-        fixture = {**fixture, 'agentsDir': str(agents), 'panes': json.loads(FIXTURE.read_text())['panes']}
         path.write_text(json.dumps(fixture))
         out = subprocess.check_output([str(driver), str(path)], text=True).splitlines()
         rows = [l.split('|')[1:] for l in out if l.startswith('row|')]

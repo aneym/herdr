@@ -5,7 +5,6 @@ import { createRoot, type Root } from "react-dom/client";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import PaneSurface from "./PaneSurface";
 import App from "./App";
-import { AGENTS_DIR } from "./faces";
 import type { Snapshot } from "./model";
 import { bridge, toBase64 } from "./bridge";
 import type { Pane } from "./model";
@@ -87,15 +86,4 @@ it("each plain shell pane's header names that pane, never a shared placeholder",
   ]);
   const labels = [...host.querySelectorAll('.pane-surface .pane-cap .label')].map(label => label.textContent);
   expect(labels).toEqual(["deploy log", "server", "vim notes.md", "scratch", "Terminal"]);
-});
-it("N panes share one agents directory read on mount and each poll", async () => {
-  vi.useFakeTimers();
-  try {
-    await renderPanes(3);
-    expect(host.querySelectorAll('.pane-surface > .pane-tools')).toHaveLength(3);
-    const reads = () => vi.mocked(bridge.fileList).mock.calls.filter(([, path]) => path === AGENTS_DIR).length;
-    expect(reads()).toBe(1);
-    await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
-    expect(reads()).toBe(2);
-  } finally { vi.useRealTimers(); }
 });

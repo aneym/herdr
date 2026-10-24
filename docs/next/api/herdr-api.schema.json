@@ -1090,6 +1090,23 @@
           ],
           "type": "string"
         },
+        "TabAgentCard": {
+          "properties": {
+            "avatar_url": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "type": "object"
+        },
         "TabDoc": {
           "properties": {
             "set_at_ms": {
@@ -1119,6 +1136,16 @@
         },
         "TabInfo": {
           "properties": {
+            "agent_card": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/event/$defs/TabAgentCard"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "agent_status": {
               "$ref": "#/schemas/event/$defs/AgentStatus"
             },
@@ -12929,6 +12956,23 @@
           ],
           "type": "string"
         },
+        "TabAgentCard": {
+          "properties": {
+            "avatar_url": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "type": "object"
+        },
         "TabDoc": {
           "properties": {
             "set_at_ms": {
@@ -12958,6 +13002,16 @@
         },
         "TabInfo": {
           "properties": {
+            "agent_card": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/TabAgentCard"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "agent_status": {
               "$ref": "#/schemas/success_response/$defs/AgentStatus"
             },

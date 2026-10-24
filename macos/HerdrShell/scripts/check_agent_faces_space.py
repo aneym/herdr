@@ -3,8 +3,9 @@
 
 Run: HERDR_SHELL_SPACE=1 python3 scripts/check_agent_faces_space.py.
 The static section check owns the row contract; this one covers the live path it cannot reach:
-agent.json files on disk, matched by the server's real pane ids, reloaded when a card is added or
-removed, and drawn by the running app: the fetched picture, the initials and the status dots are
+agent.json files on the server's disk, resolved by herdr into each tab's agent_card by its real pane
+ids or, for a stale pane, by the tab label's agent name, reloaded when a card is added or removed,
+and drawn by the running app: the fetched picture, the initials and the status dots are
 read back from the screenshot's pixels at each face's drawn frame. The states: working on an initial
 and on a picture, done, blocked, unreported, and a working agent whose open request turns its face
 dot blue (the row's only blue dot), shown plain and selected.
@@ -13,7 +14,6 @@ Writes checks/AGENT-FACES-SPACE.txt and 2x light/dark shots; never launch on the
 import json
 import os
 import pathlib
-import shlex
 import shutil
 import time
 
@@ -25,7 +25,6 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 import scenario as S  # noqa: E402
 
 S.OUT = str(ROOT / "checks/AGENT-FACES-SPACE.txt")
-AGENTS = pathlib.Path(S.LAB) / "agents"
 PICTURE = "https://avatars.githubusercontent.com/u/9919?s=64&v=4"
 lines, failures = [], []
 
@@ -109,6 +108,7 @@ def main():
     S.app("stop")
     S.lab("down")
     S.lab("up")
+    agents_dir = pathlib.Path(dict(line.split("=", 1) for line in S.lab("env").splitlines())["HOME"]) / ".agent-rails/agents"
     old = api("workspace", "list")["workspaces"]
     made = api("workspace", "create", "--label", "agents", "--no-focus")
     for workspace in old:
@@ -122,14 +122,13 @@ def main():
     for tab in tabs:
         S.lab("herdr", "tab", "set-role", tab, "agent")
     pane = {p["tab_id"]: p["pane_id"] for p in api("pane", "list")["panes"]}
-    shutil.rmtree(AGENTS, ignore_errors=True)
+    shutil.rmtree(agents_dir, ignore_errors=True)
     cards = {"recruiter": {"name": "recruiter", "pane": pane[recruiter]},
              "frank": {"name": "frank", "pane": pane[frank], "avatar_url": PICTURE},
              "home": {"name": "home", "pane": pane[home]}}
     for name, card in cards.items():
-        (AGENTS / name).mkdir(parents=True)
-        (AGENTS / name / "agent.json").write_text(json.dumps(card))
-    os.environ["HERDR_AGENTS_DIR"] = str(AGENTS)
+        (agents_dir / name).mkdir(parents=True)
+        (agents_dir / name / "agent.json").write_text(json.dumps(card))
     for tab, state in ((recruiter, "working"), (frank, "working"), (content, "working"), (content, "idle"), (home, "blocked")):
         S.lab("herdr", "pane", "report-agent", pane[tab], "--source", "spike", "--agent", "claude", "--state", state)
     # Content went idle unseen, so it reads done. Recruiter stays working, but its open request
@@ -187,15 +186,15 @@ def main():
                   not near(row_after_face(png, state, recruiter), dots["blocked"], 24))
     S.cmd({"cmd": "appearance", "mode": "light"})
 
-    # A card added or removed on disk reaches the row at the next poll.
-    # The app reads the copy pushed into the Space, so the edit happens there.
-    guest = S.guest_path(str(AGENTS))
-    card = json.dumps({"name": "content", "pane": pane[content], "avatar_url": PICTURE})
-    S.space("exec", f"mkdir -p {shlex.quote(guest + '/content')} && printf %s {shlex.quote(card)} > "
-            f"{shlex.quote(guest + '/content/agent.json')} && rm -rf {shlex.quote(guest + '/frank')}")
-    state = wait(lambda s: (faces(s).get(content) or "").endswith(PICTURE) and not (faces(s).get(frank) or "").endswith(PICTURE), 20)
+    # A card added or removed on the server's disk reaches the row at herdr's next poll. Content's card
+    # names a stale pane, so herdr finds it by the agent name heading the tab label.
+    S.lab("herdr", "tab", "rename", content, "Content · CC Sol Xhigh")
+    (agents_dir / "content").mkdir()
+    (agents_dir / "content" / "agent.json").write_text(json.dumps({"name": "content", "pane": "w9:p999", "avatar_url": PICTURE}))
+    shutil.rmtree(agents_dir / "frank")
+    state = wait(lambda s: (faces(s).get(content) or "").endswith(PICTURE) and not (faces(s).get(frank) or "").endswith(PICTURE), 40)
     got = faces(state)
-    check("an added card gives Content its picture; a removed one returns Frank to its initial",
+    check("an added card gives Content its picture by its label; a removed one returns Frank to its initial",
           (got.get(content) or "").endswith(":" + PICTURE) and (got.get(frank) or "").startswith("face:F:")
           and got[frank].count(":") == 2, json.dumps(got))
 

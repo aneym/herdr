@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { setAgentHidden } from "./control";
 import { settingsAgentRows, settleSettings } from "./settingsAgents";
 import type { Snapshot } from "./model";
-import type { AgentCard, Face } from "./faces";
+import type { Face } from "./faces";
 // Settings, full window (design rule 2026-10-01: settings is always full screen and shares the Rails
 // Settings chrome): a section list on the left, the section's page on the right with one large title
 // and its action beside it. Sections today: Agents. Ctrl+, opens and closes it, Esc closes.
@@ -15,12 +15,12 @@ function SettingsFace({ face }: { face: Face }) {
       : <span className={`face-disc face-tint-${face.tint}`}><span className="face-initial">{face.initial}</span></span>}
   </span>;
 }
-export default function Settings({ machine, snapshot, cards, close, onError }: { machine: string; snapshot: Snapshot; cards: Record<string, AgentCard>; close: () => void; onError: (error: unknown) => void }) {
+export default function Settings({ machine, snapshot, close, onError }: { machine: string; snapshot: Snapshot; close: () => void; onError: (error: unknown) => void }) {
   const [pending, setPending] = useState<Record<string, boolean>>({});
   const page = useRef<HTMLDivElement>(null);
   useEffect(() => { setPending(value => settleSettings(value, snapshot)); }, [snapshot]);
   useEffect(() => { page.current?.focus(); }, []);
-  const rows = useMemo(() => settingsAgentRows(snapshot, cards, pending), [snapshot, cards, pending]);
+  const rows = useMemo(() => settingsAgentRows(snapshot, pending), [snapshot, pending]);
   const set = (tab: string, shown: boolean) => {
     setPending(value => ({ ...value, [tab]: shown }));
     void setAgentHidden(machine, tab, !shown).catch(error => {

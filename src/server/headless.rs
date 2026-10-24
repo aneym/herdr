@@ -3390,7 +3390,10 @@ impl HeadlessServer {
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(|| crate::worktree::expand_tilde_path("~/.agent-rails/agents"));
             if self.agent_home_poller.poll(&agents_dir) {
-                self.app.state.agent_homes = self.agent_home_poller.homes().clone();
+                self.app.set_agent_homes(
+                    self.agent_home_poller.homes().clone(),
+                    self.agent_home_poller.cards().clone(),
+                );
                 changed = true;
             }
             let path = |var: &str, default: &str| {

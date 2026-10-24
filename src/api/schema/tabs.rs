@@ -153,6 +153,15 @@ pub struct TabInfo {
     /// The named section inside Pinned this pin sits in; absent when unsectioned.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pin_section: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_card: Option<TabAgentCard>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TabAgentCard {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

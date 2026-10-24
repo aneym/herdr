@@ -29,7 +29,6 @@ with tempfile.TemporaryDirectory(prefix='agents-section-') as directory:
     driver = pathlib.Path(directory) / 'dump'
     subprocess.run(['swiftc', str(ROOT / 'Sources/HerdrShell/SpacesTree.swift'),
                     str(ROOT / 'Sources/HerdrShell/MachineMerge.swift'),
-                    str(ROOT / 'Sources/HerdrShell/AgentCards.swift'),
                     str(ROOT / 'scripts/agents_section_dump.swift'), '-o', str(driver)], check=True)
 
     def dump(fixture):
@@ -79,27 +78,17 @@ with tempfile.TemporaryDirectory(prefix='agents-section-') as directory:
     unicode_fixture['machines'][0]['tabs'][0]['label'] = zwsp
     rows = dump(unicode_fixture)
     check('a zero-width space survives trim, as in JS', face('agent:ax42/w1:t1') == f"face:\u200b:{tint(zwsp)}")
-    agents = pathlib.Path(directory) / 'agents'
-    cards = {'frank': {'name': 'frank', 'pane': 'w5H:p137', 'avatar_url': 'https://example.com/frank.png'},
-             'recruiter': {'name': 'Recruiter', 'pane': 'w5P:p9', 'avatar_url': 'http://example.com/r.png'},
-             'p7probe': {'name': 'p7probe', 'pane': 'none'}}
-    for name, card in cards.items():
-        (agents / name).mkdir(parents=True)
-        (agents / name / 'agent.json').write_text(json.dumps(card))
-    (agents / 'broken').mkdir()
-    (agents / 'broken' / 'agent.json').write_text('{not json')
     carded = json.loads(json.dumps(fixture))
     for tab in carded['input']['tabs'][:2]:
         tab['role'] = 'agent'
-    carded['agentsDir'] = str(agents)
-    carded['panes'] = [['w5H:p137', 's1:t1'], ['w5P:p9', 's1:t2'], ['w5H:p138', 's1:t2'], ['w5H:pZF', 's2:t1']]
+    carded['input']['tabs'][0].update(agentName='frank', avatar='https://example.com/frank.png')
+    carded['input']['tabs'][1]['agentName'] = 'Recruiter'
     rows = dump(carded)
-    check('agent.json name and https avatar_url give the face of the tab holding its pane',
+    check("herdr's agent_card name and picture give the agent row its face",
           face('agent:s1:t1') == f"face:F:{tint('frank')}:https://example.com/frank.png")
-    check('a non-https avatar_url falls back to tinted initials of the card name',
+    check('a card with no picture falls back to tinted initials of the card name',
           face('agent:s1:t2') == f"face:R:{tint('Recruiter')}")
-    check('a card on a plain tab, a pane-less card and a broken card add nothing',
-          face('tab:s2:t1') is None and 'p7probe' not in '\n'.join(rows) and len([r for r in rows if 'face:' in r]) == 3)
+    check('plain tabs carry no face', face('tab:s2:t1') is None and len([r for r in rows if 'face:' in r]) == 3)
     check('the status glyph and tone still ride the agent row', field('agent:s1:t1')[4:6] == ['●', 'working'])
     rows = original
     fixture['input']['tabs'][0]['role'] = 'agent'

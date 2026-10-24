@@ -3,13 +3,33 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use crate::api::schema::HomeLocation;
+use crate::api::schema::{HomeLocation, TabAgentCard};
 
-fn parse_card(bytes: &[u8]) -> Option<String> {
+struct Card {
+    pane: Option<String>,
+    card: TabAgentCard,
+}
+
+fn parse_card(bytes: &[u8]) -> Option<Card> {
     let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
-    let name = value.get("name")?.as_str()?;
-    let pane = value.get("pane")?.as_str()?;
-    (!name.is_empty() && !pane.is_empty() && pane != "none").then(|| pane.to_owned())
+    let text = |key: &str| {
+        value
+            .get(key)
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_owned)
+    };
+    let name = text("name")?;
+    let pane = text("pane").filter(|pane| pane != "none");
+    let avatar_url = text("avatar_url").filter(|url| {
+        url.get(..8)
+            .is_some_and(|scheme| scheme.eq_ignore_ascii_case("https://"))
+    });
+    Some(Card {
+        pane,
+        card: TabAgentCard { name, avatar_url },
+    })
 }
 
 fn parse_marker(bytes: &[u8]) -> bool {
@@ -36,13 +56,24 @@ pub(crate) fn folder_key(name: &str) -> String {
 }
 
 /// The folder an agent tab's label names: "League Coach" -> "league-coach".
-pub(crate) fn label_folder(label: &str) -> String {
+fn label_folder(label: &str) -> String {
     label
         .trim()
         .to_lowercase()
         .split_whitespace()
         .collect::<Vec<_>>()
         .join("-")
+}
+
+pub(crate) fn label_folders(label: &str) -> Vec<String> {
+    let mut folders = vec![label_folder(label)];
+    if let Some((head, _)) = label.split_once(" · ") {
+        let head = label_folder(head);
+        if !head.is_empty() && !folders.contains(&head) {
+            folders.push(head);
+        }
+    }
+    folders
 }
 
 #[derive(Default)]
@@ -56,6 +87,7 @@ struct CachedFile {
 pub(crate) struct AgentHomePoller {
     files: HashMap<PathBuf, CachedFile>,
     homes: HashMap<String, HomeLocation>,
+    cards: HashMap<String, TabAgentCard>,
     file_reads: u64,
 }
 
@@ -90,6 +122,7 @@ impl AgentHomePoller {
             .collect();
         folders.sort_by_key(|entry| entry.file_name());
         let mut homes = HashMap::new();
+        let mut cards = HashMap::new();
         let mut visited = HashSet::new();
         for entry in folders {
             let folder = entry.path();
@@ -97,7 +130,7 @@ impl AgentHomePoller {
             let marker = folder.join(".rails/home.json");
             let status = folder.join(".rails/status.json");
             visited.extend([card.clone(), marker.clone(), status.clone()]);
-            let pane = self.file(&card).bytes.as_deref().and_then(parse_card);
+            let card = self.file(&card).bytes.as_deref().and_then(parse_card);
             let marker = self.file(&marker);
             let has_marker = marker.exists;
             let valid_marker = marker.bytes.as_deref().is_some_and(parse_marker);
@@ -109,27 +142,38 @@ impl AgentHomePoller {
                 _ if has_marker || status.is_some() => HomeLocation::Unsynced,
                 _ => HomeLocation::Local,
             };
-            if let Some(pane) = pane {
-                homes.entry(pane).or_insert(location);
+            if let Some(pane) = card.as_ref().and_then(|card| card.pane.clone()) {
+                homes.entry(pane.clone()).or_insert(location);
+                if let Some(card) = &card {
+                    cards.entry(pane).or_insert_with(|| card.card.clone());
+                }
             }
             // A pinned agent tab with no card pane finds its home by folder name.
             if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
                 if let Some(name) = entry.file_name().to_str() {
                     homes.insert(folder_key(name), location);
+                    if let Some(card) = card {
+                        cards.insert(folder_key(name), card.card);
+                    }
                 }
             }
         }
         self.files.retain(|path, _| visited.contains(path));
-        if self.homes == homes {
+        if self.homes == homes && self.cards == cards {
             false
         } else {
             self.homes = homes;
+            self.cards = cards;
             true
         }
     }
 
     pub(crate) fn homes(&self) -> &HashMap<String, HomeLocation> {
         &self.homes
+    }
+
+    pub(crate) fn cards(&self) -> &HashMap<String, TabAgentCard> {
+        &self.cards
     }
 
     #[cfg(test)]

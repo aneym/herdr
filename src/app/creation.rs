@@ -225,6 +225,29 @@ impl App {
         self.tab_info_with_rank(ws_idx, tab_idx, self.priority_workspace_rank(ws_idx))
     }
 
+    fn agent_home_key(&self, ws_idx: usize, tab_idx: usize, tab_id: &str) -> Option<String> {
+        let ws = self.state.workspaces.get(ws_idx)?;
+        let tab = ws.tabs.get(tab_idx)?;
+        let by_pane = tab.layout.pane_ids().into_iter().find_map(|pane_id| {
+            let public_id = self.public_pane_id(ws_idx, pane_id)?;
+            self.state
+                .agent_homes
+                .contains_key(&public_id)
+                .then_some(public_id)
+        });
+        by_pane.or_else(|| {
+            let agent_tab = self.state.pinned_tabs.iter().any(|pin| {
+                pin.tab_id == tab_id && pin.role == Some(crate::api::schema::TabRole::Agent)
+            });
+            agent_tab.then_some(())?;
+            let label = ws.tab_display_name(tab_idx)?;
+            crate::agent_home::label_folders(&label)
+                .into_iter()
+                .map(|folder| crate::agent_home::folder_key(&folder))
+                .find(|key| self.state.agent_homes.contains_key(key))
+        })
+    }
+
     pub(super) fn tab_info_with_rank(
         &self,
         ws_idx: usize,
@@ -245,25 +268,14 @@ impl App {
             .max_by_key(|(state, seen)| tab_attention_priority(*state, *seen))
             .unwrap_or((crate::detect::AgentState::Unknown, true));
         let tab_id = self.public_tab_id(ws_idx, tab_idx)?;
+        let agent_key = self.agent_home_key(ws_idx, tab_idx, &tab_id);
         Some(crate::api::schema::TabInfo {
-            home_location: tab
-                .layout
-                .pane_ids()
-                .into_iter()
-                .find_map(|pane_id| {
-                    let public_id = self.public_pane_id(ws_idx, pane_id)?;
-                    self.state.agent_homes.get(&public_id).copied()
-                })
-                .or_else(|| {
-                    let agent_tab = self.state.pinned_tabs.iter().any(|pin| {
-                        pin.tab_id == tab_id && pin.role == Some(crate::api::schema::TabRole::Agent)
-                    });
-                    let label = ws.tab_display_name(tab_idx)?;
-                    agent_tab.then_some(())?;
-                    let key =
-                        crate::agent_home::folder_key(&crate::agent_home::label_folder(&label));
-                    self.state.agent_homes.get(&key).copied()
-                }),
+            home_location: agent_key
+                .as_ref()
+                .and_then(|key| self.state.agent_homes.get(key).copied()),
+            agent_card: agent_key
+                .as_ref()
+                .and_then(|key| self.state.agent_cards.get(key).cloned()),
             runs_on: tab
                 .layout
                 .pane_ids()
@@ -531,6 +543,22 @@ impl App {
     /// the box, agent panes whose foreground job is ssh, and this machine's name. Only
     /// agent tabs are probed for ssh, so the scheduled poll stays a handful of process
     /// lookups. True when anything changed.
+    pub(crate) fn set_agent_homes(
+        &mut self,
+        homes: std::collections::HashMap<String, crate::api::schema::HomeLocation>,
+        cards: std::collections::HashMap<String, crate::api::schema::TabAgentCard>,
+    ) {
+        self.state.agent_homes = homes;
+        self.state.agent_cards = cards;
+        for index in 0..self.state.workspaces.len() {
+            let workspace = self.workspace_info(index);
+            self.emit_event(EventEnvelope {
+                event: EventKind::WorkspaceUpdated,
+                data: EventData::WorkspaceUpdated { workspace },
+            });
+        }
+    }
+
     pub(crate) fn refresh_runs_on(
         &mut self,
         boxed: &std::collections::HashSet<String>,

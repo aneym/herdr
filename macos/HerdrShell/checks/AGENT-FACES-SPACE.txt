@@ -29,4 +29,4 @@
 [PASS] dark-selected: the shot is 2x
 [PASS] dark-selected: working Recruiter's request turns its face dot blue, not green
 [PASS] dark-selected: and draws no trailing dot on Recruiter's row
-[PASS] an added card gives Content its picture; a removed one returns Frank to its initial
+[PASS] an added card gives Content its picture by its label; a removed one returns Frank to its initial

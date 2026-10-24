@@ -336,11 +336,10 @@ extension HerdrModel {
     /// This machine's tabs with their agent cards, for Settings > Agents (SettingsAgents.rows).
     var settingsInput: SpacesInput {
         guard let s = snapshot else { return SpacesInput(spaces: [], tabs: [], focusedTab: nil) }
-        let input = SpacesInput(spaces: Self.spaces(s), tabs: s.tabs.map {
+        return SpacesInput(spaces: Self.spaces(s), tabs: s.tabs.map {
             SpacesInput.Tab(id: $0.tab_id, space: $0.workspace_id, label: $0.label ?? $0.tab_id, pinIndex: $0.pin_index,
-                            role: $0.role, hidden: $0.hidden ?? false, homeLocation: $0.home_location, runsOn: $0.runs_on)
+                            role: $0.role, hidden: $0.hidden ?? false, homeLocation: $0.home_location, runsOn: $0.runs_on, agentName: $0.agent_card?.name, avatar: $0.agent_card?.avatar_url)
         }, focusedTab: nil)
-        return AgentCards.attach(input, panes: s.panes.map { ($0.pane_id, $0.tab_id) }, cards: catalog.snapshot.agents)
     }
 
     func isPinned(_ tab: String) -> Bool {
@@ -418,9 +417,8 @@ extension HerdrModel {
                     return SpacesInput.Agent(status: agent.agent_status ?? "unknown", parent: parentTab)
                 },
                 focused: tab.tab_id == state.selectedTab, status: tab.agent_status ?? "unknown", pinIndex: tab.pin_index, work: tab.work_status, role: tab.role, sortRank: tab.sort_rank ?? 0,
-request: s.panes.filter { $0.tab_id == tab.tab_id }.compactMap { $0.tokens?["request"] }.first, hidden: tab.hidden ?? false, homeLocation: tab.home_location, runsOn: tab.runs_on, pinSection: tab.pin_section)
+request: s.panes.filter { $0.tab_id == tab.tab_id }.compactMap { $0.tokens?["request"] }.first, hidden: tab.hidden ?? false, homeLocation: tab.home_location, runsOn: tab.runs_on, pinSection: tab.pin_section, agentName: tab.agent_card?.name, avatar: tab.agent_card?.avatar_url)
         }, focusedTab: state.selectedTab, pinSections: s.pin_sections)
-        input = AgentCards.attach(input, panes: s.panes.map { ($0.pane_id, $0.tab_id) }, cards: catalog.snapshot.agents)
         // areas.json owns the space groups whenever it exists (an empty list clears them), as the Rust
         // server merges them; without it the overlay's own groups stand.
         var groupedOverlay = spacesOverlay

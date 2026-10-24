@@ -88,8 +88,10 @@ final class FacePictures: ObservableObject {
         return URLSession(configuration: config)
     }()
 
+    static func isPicture(_ url: String) -> Bool { URL(string: url)?.scheme?.lowercased() == "https" }
+
     func load(_ url: String) {
-        guard !asked.contains(url), AgentCards.isPicture(url), let target = URL(string: url) else { return }
+        guard !asked.contains(url), Self.isPicture(url), let target = URL(string: url) else { return }
         asked.insert(url)
         session.dataTask(with: target) { [weak self] data, response, _ in
             guard let data, (response as? HTTPURLResponse)?.statusCode == 200, let image = NSImage(data: data) else { return }

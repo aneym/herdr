@@ -8,16 +8,15 @@ struct SpacesInput: Codable {
     struct Agent: Codable { var status: String; var parent: String? = nil }
     /// `work` is herdr's one answer to "is this chat working" (server app/work_status.rs); nil from older servers.
     struct Tab: Codable { var id: String; var space: String; var label: String; var agents: [Agent] = []; var focused = false; var status = "unknown"; var pinIndex: Int? = nil; var work: String? = nil; var role: String? = nil; var sortRank: UInt32 = 0; var request: String? = nil
-        /// The agent card this tab runs (AgentCards): its name and https picture.
         var agentName: String? = nil; var avatar: String? = nil; var hidden = false; var homeLocation: String? = nil
         /// Where the chat runs (herdr TabInfo.runs_on): "box", or a machine name such as "Studio".
         var runsOn: String? = nil
         var pinSection: String? = nil
-        init(id: String, space: String, label: String, agents: [Agent] = [], focused: Bool = false, status: String = "unknown", pinIndex: Int? = nil, work: String? = nil, role: String? = nil, sortRank: UInt32 = 0, request: String? = nil, hidden: Bool = false, homeLocation: String? = nil, runsOn: String? = nil, pinSection: String? = nil) { self.pinSection = pinSection; self.hidden = hidden; self.homeLocation = homeLocation; self.runsOn = runsOn; self.id = id; self.space = space; self.label = label; self.agents = agents; self.focused = focused; self.status = status; self.pinIndex = pinIndex; self.work = work; self.role = role; self.sortRank = sortRank; self.request = request }
+        init(id: String, space: String, label: String, agents: [Agent] = [], focused: Bool = false, status: String = "unknown", pinIndex: Int? = nil, work: String? = nil, role: String? = nil, sortRank: UInt32 = 0, request: String? = nil, hidden: Bool = false, homeLocation: String? = nil, runsOn: String? = nil, pinSection: String? = nil, agentName: String? = nil, avatar: String? = nil) { self.agentName = agentName; self.avatar = avatar; self.pinSection = pinSection; self.hidden = hidden; self.homeLocation = homeLocation; self.runsOn = runsOn; self.id = id; self.space = space; self.label = label; self.agents = agents; self.focused = focused; self.status = status; self.pinIndex = pinIndex; self.work = work; self.role = role; self.sortRank = sortRank; self.request = request }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: Field.self)
             id = try c.decode(String.self, forKey: Field("id")); space = try c.decode(String.self, forKey: Field("space")); label = try c.decode(String.self, forKey: Field("label"))
-            agents = c.value("agents", []); focused = c.value("focused", false); status = c.value("status", "unknown"); pinIndex = c.optional("pinIndex"); work = c.optional("work"); role = c.optional("role"); sortRank = c.value("sortRank", 0); request = c.optional("request"); hidden = c.value("hidden", false); homeLocation = c.optional("homeLocation"); runsOn = c.optional("runsOn"); pinSection = c.optional("pinSection")
+            agents = c.value("agents", []); focused = c.value("focused", false); status = c.value("status", "unknown"); pinIndex = c.optional("pinIndex"); work = c.optional("work"); role = c.optional("role"); sortRank = c.value("sortRank", 0); request = c.optional("request"); hidden = c.value("hidden", false); homeLocation = c.optional("homeLocation"); runsOn = c.optional("runsOn"); pinSection = c.optional("pinSection"); agentName = c.optional("agentName"); avatar = c.optional("avatar")
         }
     }
     var spaces: [Space]; var tabs: [Tab]; var focusedTab: String?

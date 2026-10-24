@@ -1,5 +1,5 @@
 {
-  "_comment": "Settings > Agents rows from one SpacesInput, read by macos/HerdrShell/scripts/check_settings_agents.py and windows/HerdrShell/app/src/settingsAgents.test.tsx. Tints are Rails personTint over nine. `cards` are agent.json files under an agents dir; `panes` are [pane, tab] pairs, as HerdrModel attaches them.",
+  "_comment": "Settings > Agents rows from one SpacesInput, read by macos/HerdrShell/scripts/check_settings_agents.py and windows/HerdrShell/app/src/settingsAgents.test.tsx. Tints are Rails personTint over nine. `agentName` is the name of the agent card herdr resolves for the tab (TabInfo.agent_card).",
   "input": {
     "spaces": [
       {
@@ -23,7 +23,8 @@
         "label": "factory tab",
         "pinIndex": 1,
         "role": "agent",
-        "runsOn": "Studio"
+        "runsOn": "Studio",
+        "agentName": "Factory"
       },
       {
         "id": "w1:t3",
@@ -62,14 +63,14 @@
     {
       "tab": "w1:t3",
       "title": "CoS",
-      "meta": "home · box",
+      "meta": "home \u00b7 box",
       "shown": true,
       "face": "C:8"
     },
     {
       "tab": "w1:t2",
       "title": "Factory",
-      "meta": "home · Studio",
+      "meta": "home \u00b7 Studio",
       "shown": true,
       "face": "F:8"
     },
@@ -83,32 +84,9 @@
     {
       "tab": "w2:t2",
       "title": "Recruiter",
-      "meta": "games · Studio",
+      "meta": "games \u00b7 Studio",
       "shown": true,
       "face": "R:6"
     }
-  ],
-  "cards": [
-    {
-      "dir": "factory",
-      "agent": {
-        "name": "Factory",
-        "pane": "w1:p2"
-      }
-    }
-  ],
-  "panes": [
-    [
-      "w1:p1",
-      "w1:t1"
-    ],
-    [
-      "w1:p2",
-      "w1:t2"
-    ],
-    [
-      "w1:p3",
-      "w1:t3"
-    ]
   ]
 }
