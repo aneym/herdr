@@ -7,9 +7,11 @@ reaches the pasteboard with Cmd-C, as plain text any app can paste.
 Lab `shellspike-copy`. The app runs in the Cua Space (its own macOS guest) on a Studio
 lab server. Pane 1 runs a stand-in agent that turns on SGR mouse reporting, prints two
 known lines and counts the mouse reports it gets, so a plain drag goes to the program
-and leaves no Ghostty selection, as in a Claude pane. Pane 2 runs a plain shell with no mouse reporting: its surface must not capture the mouse,
-a plain drag makes a Ghostty selection that Cmd-C copies, and the selection is still there
-after 2 s idle. Mouse events and Cmd-C go through the app's window and Edit menu as for a physical mouse and key. Asserts on the guest's
+and leaves no Ghostty selection, as in a Claude pane. Pane 2 runs a plain shell with no
+mouse reporting: its surface must not capture the mouse, a plain drag makes a Ghostty
+selection that Cmd-C copies, and the selection is still there after 2 s idle. Mouse
+events and Cmd-C go through the app's window and Edit menu as for a physical mouse and
+key. Asserts on the guest's
 general pasteboard (pbpaste in the guest) after: a plain drag, a double click on a word,
 a shift-drag (Ghostty's own selection), a drag over a line the pane soft-wrapped (pasted
 as one line, read from the server's screen), and a release the program answers with an
@@ -164,7 +166,6 @@ def main():
     check("the lab pane's program owns the mouse in the guest Shell", bool(surface(s, p1).get("mouse_captured")),
           f"focused={None if s is None else s.get('focused_pane')} mouse_captured={surface(s, p1).get('mouse_captured')}")
 
-    # 1. Plain shell drag: the client must leave native selection to Ghostty.
     herdr("pane", "run", p2, "clear; echo PLAIN-SHELL native drag text")
     S.wait_read(p2, lambda x: "PLAIN-SHELL native drag text" in x, 10)
     mouse(p2, "down", 40, 5)
@@ -190,7 +191,7 @@ def main():
     check("the native selection survives idle redraw", surface(S.state(), p2).get("selection") == selected,
           f"selection={surface(S.state(), p2).get('selection')!r}")
 
-    # 2. Plain drag from the first cell to the end of COPY-BETA: the program gets it.
+    # 1. Plain drag from the first cell to the end of COPY-BETA: the program gets it.
     before = reports(p1)
 
     def drag():

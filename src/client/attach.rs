@@ -20,8 +20,6 @@ pub(super) struct AttachEscapeState;
 #[cfg(unix)]
 pub(super) struct AttachEscapeState {
     pending_prefix: Option<Vec<u8>>,
-    /// When set, Ctrl+B is not an escape prefix: every key goes to the pane and
-    /// the caller detaches by ending the process (native hosts own detach).
     no_escape: bool,
 }
 
@@ -144,8 +142,6 @@ impl AttachEscapeState {
             };
         }
 
-        // The host framer normally supplies one complete event. Preserve the legacy
-        // byte path for coalesced plain input used by older terminals.
         let mut output = Vec::with_capacity(data.len());
         for byte in data {
             if let Some(mut prefix) = self.pending_prefix.take() {

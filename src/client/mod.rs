@@ -245,7 +245,6 @@ fn run_client_with_mode(
         }
     };
 
-    // Get the terminal geometry before handshake (before raw mode).
     let (cols, rows, cell_width_px, cell_height_px, exact_cell_size) =
         initial_terminal_geometry(pixel_geometry_enabled, kitty_graphics_enabled)?;
 
@@ -318,7 +317,6 @@ fn run_client_with_mode(
         terminal_guard.host_escape_disambiguation_active();
     loop_config.initial_host_input = terminal_guard.take_buffered_host_input();
 
-    // Install a panic hook so the foreground client always restores its terminal.
     let panic_restore = terminal_guard.panic_restore();
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -326,7 +324,6 @@ fn run_client_with_mode(
         original_hook(info);
     }));
 
-    // Create the tokio runtime.
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
