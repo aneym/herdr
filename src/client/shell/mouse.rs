@@ -2344,6 +2344,7 @@ impl ClientShellState {
                         .iter()
                         .chain(self.hits.factory_scope_urls.iter())
                         .chain(self.hits.factory_usage_urls.iter())
+                        .chain(self.hits.automation_urls.iter())
                         .find(|(rect, _)| super::contains(*rect, point))
                     {
                         outcome
