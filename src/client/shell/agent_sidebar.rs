@@ -1066,6 +1066,12 @@ fn render_panel_list_entry(
         AgentPanelListEntry::PinnedTab(row) => {
             let _ = render_pinned_tab_row(buffer, rect, row, config, hits);
         }
+        AgentPanelListEntry::ServerAutomationsHeader => {
+            super::automations_sidebar::render_header(buffer, rect, config);
+        }
+        AgentPanelListEntry::ServerAutomation(item) => {
+            super::automations_sidebar::render_row(buffer, rect, item, config, hits);
+        }
         AgentPanelListEntry::SpaceHeader(header) => {
             render_tree_header(buffer, rect, header, true, config, hits);
         }

@@ -405,6 +405,8 @@ pub(super) enum AgentPanelListEntry {
     },
     /// The `pinned` section label at the very top of the sidebar.
     PinnedChatsHeader,
+    ServerAutomationsHeader,
+    ServerAutomation(Box<crate::api::schema::AutomationSummary>),
     AgentChatsHeader,
     HiddenAgentsHeader {
         count: usize,
@@ -675,6 +677,7 @@ pub(super) fn folded_pinned_tab_entries(
         }
     }
     visible.extend(plain);
+    visible.extend(super::automations_sidebar::entries(&snapshot.automations));
     visible
 }
 
@@ -776,6 +779,7 @@ impl AgentPanelListEntry {
     pub(super) fn line_count(&self) -> usize {
         match self {
             Self::Agent(row) | Self::Automation(row) => row.rows.len().max(1),
+            Self::ServerAutomation(item) => super::automations_sidebar::line_count(item),
             Self::FactoryTab(row)
                 if row.workflow
                     && !row.done
@@ -2702,6 +2706,8 @@ fn group_spaces(
                 | AgentPanelListEntry::AgentChatsHeader
                 | AgentPanelListEntry::HiddenAgentsHeader { .. }
                 | AgentPanelListEntry::PinnedChatsHeader
+                | AgentPanelListEntry::ServerAutomationsHeader
+                | AgentPanelListEntry::ServerAutomation(_)
                 | AgentPanelListEntry::PinnedTab(_)
         ) {
             // As in reorder_spaces: the goal picker and the pinned section sit
@@ -2749,6 +2755,8 @@ fn reorder_spaces(
                 | AgentPanelListEntry::AgentChatsHeader
                 | AgentPanelListEntry::HiddenAgentsHeader { .. }
                 | AgentPanelListEntry::PinnedChatsHeader
+                | AgentPanelListEntry::ServerAutomationsHeader
+                | AgentPanelListEntry::ServerAutomation(_)
                 | AgentPanelListEntry::PinnedTab(_)
         ) {
             // The goal picker and the pinned section sit above the spaces and
