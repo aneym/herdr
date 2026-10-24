@@ -858,6 +858,7 @@ pub struct AppState {
     pub agent_homes: std::collections::HashMap<String, crate::api::schema::HomeLocation>,
     pub agent_cards: std::collections::HashMap<String, crate::api::schema::TabAgentCard>,
     pub agents_dir: Option<std::path::PathBuf>,
+    pub automations: Vec<crate::api::schema::AutomationSummary>,
     /// Ephemeral server-resolved run places off this machine ("box" or an ssh machine), keyed
     /// by public pane id; every other pane runs on `local_machine` (`runs_on.rs`).
     pub runs_on: std::collections::HashMap<String, String>,
@@ -1615,6 +1616,7 @@ impl AppState {
             agent_homes: Default::default(),
             agent_cards: Default::default(),
             agents_dir: None,
+            automations: Vec::new(),
             runs_on: Default::default(),
             local_machine: None,
             next_agent_state_change_seq: 0,

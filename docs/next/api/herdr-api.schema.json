@@ -8425,6 +8425,63 @@
           ],
           "type": "object"
         },
+        "AutomationSummary": {
+          "properties": {
+            "cadence": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "last_run": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "next_run": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "report": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "report_url": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "result": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "name"
+          ],
+          "type": "object"
+        },
         "ClientWindowTitleReason": {
           "enum": [
             "set",
@@ -12872,6 +12929,12 @@
             "agents": {
               "items": {
                 "$ref": "#/schemas/success_response/$defs/AgentInfo"
+              },
+              "type": "array"
+            },
+            "automations": {
+              "items": {
+                "$ref": "#/schemas/success_response/$defs/AutomationSummary"
               },
               "type": "array"
             },

@@ -75,6 +75,7 @@ impl App {
                 .filter(|terminal| terminal.pending_agent_resume_plan.is_some())
                 .count() as u32,
             pin_sections: self.state.pin_sections.clone(),
+            automations: self.state.automations.clone(),
         }
     }
 }

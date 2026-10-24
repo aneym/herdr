@@ -214,6 +214,7 @@ pub struct HeadlessServer {
     factory_overlay_poller: factory_overlay::FactoryOverlayPoller,
     next_factory_overlay_poll: Option<Instant>,
     agent_home_poller: crate::agent_home::AgentHomePoller,
+    automations_poller: crate::automations::AutomationsPoller,
     next_agent_home_poll: Option<Instant>,
     /// Outer window title last pushed, paired with the client that received it.
     /// Keying on the client means a newly attached terminal is written to even
@@ -372,6 +373,7 @@ impl HeadlessServer {
             factory_overlay_poller: Default::default(),
             next_factory_overlay_poll: None,
             agent_home_poller: Default::default(),
+            automations_poller: Default::default(),
             next_agent_home_poll: None,
             sent_window_title: None,
             api_window_title: None,
@@ -3389,6 +3391,14 @@ impl HeadlessServer {
             let agents_dir = std::env::var_os("HERDR_AGENTS_DIR")
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(|| crate::worktree::expand_tilde_path("~/.agent-rails/agents"));
+            if self
+                .automations_poller
+                .poll(&crate::automations::automations_dir())
+            {
+                self.app
+                    .set_automations(self.automations_poller.summaries().to_vec());
+                changed = true;
+            }
             if self.agent_home_poller.poll(&agents_dir) {
                 self.app.set_agent_homes(
                     self.agent_home_poller.homes().clone(),

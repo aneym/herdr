@@ -978,6 +978,8 @@ pub struct ClientShellSnapshot {
     /// what Cmd+n+1 selects. Absent on endpoints that predate pinned chats.
     #[serde(default)]
     pub pinned_tabs: Vec<ClientShellPinnedTab>,
+    #[serde(default)]
+    pub automations: Vec<crate::api::schema::AutomationSummary>,
 }
 
 /// One pinned chat in a `ClientShellSnapshot`, in pin order.
@@ -3009,6 +3011,7 @@ mod tests {
                 description: Some("deploy".into()),
             }],
             pinned_tabs: Vec::new(),
+            automations: Vec::new(),
         }));
         let encoded = bincode::serde::encode_to_vec(&msg, bincode::config::standard()).unwrap();
         let (decoded, _): (ServerMessage, _) =

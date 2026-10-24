@@ -115,6 +115,7 @@ fn test_headless_server_with_event_hub(event_hub: api::EventHub) -> HeadlessServ
         popup_owner_tab_id: None,
         client_shell_boot_id: "test-boot".into(),
         agent_home_poller: Default::default(),
+        automations_poller: Default::default(),
         // Ordinary scheduler tests must not read the machine's real agent cards.
         // Home-location scenarios explicitly reset this deadline when polling.
         next_agent_home_poll: Some(Instant::now() + Duration::from_secs(365 * 24 * 60 * 60)),

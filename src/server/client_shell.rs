@@ -349,6 +349,7 @@ pub(super) fn snapshot_with_completions(
                 })
             })
             .collect(),
+        automations: app.state.automations.clone(),
     };
     (shell, completions)
 }

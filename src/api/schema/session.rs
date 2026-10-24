@@ -25,6 +25,8 @@ pub struct SessionSnapshot {
     /// Named sections inside Pinned, in order; each pinned tab names its own in `TabInfo.pin_section`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pin_sections: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub automations: Vec<super::automations::AutomationSummary>,
 }
 
 fn is_zero(value: &u32) -> bool {
