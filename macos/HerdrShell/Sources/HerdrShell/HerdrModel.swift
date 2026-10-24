@@ -420,7 +420,7 @@ extension HerdrModel {
                 },
                 focused: tab.tab_id == state.selectedTab, status: tab.agent_status ?? "unknown", pinIndex: tab.pin_index, work: tab.work_status, role: tab.role, sortRank: tab.sort_rank ?? 0,
 request: s.panes.filter { $0.tab_id == tab.tab_id }.compactMap { $0.tokens?["request"] }.first, hidden: tab.hidden ?? false, homeLocation: tab.home_location, runsOn: tab.runs_on, pinSection: tab.pin_section, agentName: tab.agent_card?.name, avatar: tab.agent_card?.avatar_url)
-        }, focusedTab: state.selectedTab, pinSections: s.pin_sections)
+        }, focusedTab: state.selectedTab, pinSections: s.pin_sections, automations: s.automations)
         // areas.json owns the space groups whenever it exists (an empty list clears them), as the Rust
         // server merges them; without it the overlay's own groups stand.
         var groupedOverlay = spacesOverlay

@@ -1,0 +1,14 @@
+[PASS] server serves both fixture automations in session.snapshot
+[PASS] AUTOMATIONS header follows the PINNED block directly
+[PASS] header, two rows and one detail row per result
+[PASS] header reads AUTOMATIONS like PINNED
+[PASS] ok row: done glyph, name, cadence and next run
+[PASS] detail row is dim, one level in, with the result
+[PASS] error row: bad tone, cadence without a next run
+[PASS] error detail shows the failure
+[PASS] light Shell window shot written
+[PASS] dark Shell window shot written
+[PASS] clicking the row opens its report in Aside
+[PASS] the click does not change the selected tab
+[PASS] a row without report_url opens nothing
+13 passed; 0 failed

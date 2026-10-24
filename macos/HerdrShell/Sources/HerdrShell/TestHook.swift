@@ -318,6 +318,11 @@ final class TestHook {
             view = c.sidebarHostView
             guard let f = c.state.rowFrames["pinned+"] else { log("hook: click: no pinned +"); return }
             frame = f
+        case "spaces_row":
+            view = c.sidebarHostView
+            let key = obj["row"] as? String ?? ""
+            guard let f = c.state.rowFrames[key] else { log("hook: click: no spaces row \(key)"); return }
+            frame = f
         case "focus", "thoughts":
             view = c.sidebarHostView
             guard let f = c.state.rowFrames[target] else { return }

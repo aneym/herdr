@@ -21,6 +21,7 @@ struct SpacesInput: Codable {
     }
     var spaces: [Space]; var tabs: [Tab]; var focusedTab: String?
     var pinSections: [String]? = nil
+    var automations: [AutomationSummary]? = nil
 }
 
 /// Overlay writers evolve independently of the shell. Missing fields use the Rust defaults.
@@ -157,10 +158,11 @@ struct SpacesChrome: Codable {
 }
 
 struct SpacesRow: Identifiable, Equatable {
-    enum Kind: String { case title, goal, space, section, group, tab, run, hidden, footerUsage, footerHost }
+    enum Kind: String { case title, goal, space, section, group, tab, run, automation, hidden, footerUsage, footerHost }
     var id: String; var kind: Kind; var depth = 0; var chevron = "none"; var glyph = ""; var tone = "mute"; var title: String; var trailing = ""
     var alert = "none"; var link: String?; var tab: String?; var toggleKey: String?; var dim = false
     var pinGroup: String?
+    var report: String?
     /// The machine running this chat when it is not this one (MachineMerge); nil on local rows.
     var badge: String?
     /// nil while that machine is healthy; "unreachable" or "needs update" otherwise.
@@ -349,6 +351,7 @@ enum SpacesTree {
                 if !closed { out += members.map { var row = pinRow($0, prefix: "pinned:"); row.depth = 1; row.pinGroup = name; return row } }
             }
         }
+        out += AutomationRows.rows(input.automations ?? [])
         if !choices.isEmpty { out.append(SpacesRow(id: "goal", kind: .goal, title: "goal " + (filter?.replacingOccurrences(of: ":", with: " · ") ?? "All"), trailing: filter == nil ? "▾" : "✕")) }
         let hidden = input.spaces.filter { $0.collapsed || chrome.collapsedSpaces.contains($0.id) }
         let visible = input.spaces.filter { !$0.collapsed && !chrome.collapsedSpaces.contains($0.id) }

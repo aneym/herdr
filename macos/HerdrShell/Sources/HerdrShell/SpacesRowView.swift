@@ -40,7 +40,7 @@ struct SpacesRowView: View {
     /// Tab, section and Hidden-agent header rows hold the leading chevron slot, so their
     /// labels share one column. The Hidden header keeps its actual chevron trailing.
     /// Runs never open; their indent already nests them.
-    private var treeRow: Bool { row.kind == .tab || row.kind == .section || row.id == "hiddenagents" }
+    private var treeRow: Bool { row.kind == .tab || row.kind == .automation || row.kind == .section || row.id == "hiddenagents" }
     private var agentRow: Bool { row.id.hasPrefix("agent:") || row.id.hasPrefix("hiddenagent:") }
 
     var body: some View {
@@ -226,7 +226,7 @@ struct SpacesRowView: View {
     /// Leading inset: sections sit under the space name, rows under the section label.
     private var indent: CGFloat {
         switch row.kind {
-        case .tab, .run: return CGFloat(row.depth) * 12 + 12
+        case .tab, .run, .automation: return CGFloat(row.depth) * 12 + 12
         case .section, .group: return CGFloat(row.depth) * 12
         default: return 0
         }

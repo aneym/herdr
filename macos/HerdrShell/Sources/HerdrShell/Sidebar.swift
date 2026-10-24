@@ -204,7 +204,7 @@ struct SidebarView: View {
     private func rows(_ spaces: [SpacesRow]) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             if state.mode == .spaces {
-                ForEach(spaces.filter { $0.kind != .footerUsage && $0.kind != .footerHost }) { spacesRow($0, firstSpaceId: spaces.first { $0.kind == .space }?.id, all: spaces) }
+                ForEach(spaces.filter { $0.kind != .footerUsage && $0.kind != .footerHost }) { spacesRow($0, firstSpaceId: spaces.first { $0.kind == .space }?.id, all: spaces).help($0.hover ?? "") }
             } else { ForEach(lines) { line in lineView(line) } }
         }
         .padding(.horizontal, ShellSpace.step8)
@@ -323,6 +323,8 @@ struct SidebarView: View {
             }
         } else if part == "doc" {
             if let doc = row.tab.flatMap({ model.reviewDoc($0) }) { ReviewDocOpener.open(doc) }
+        } else if row.kind == .automation {
+            if let raw = row.report, let url = URL(string: raw), url.scheme?.lowercased() == "https" { ReviewDocOpener.open(url) }
         } else if part == "link" {
             if let raw = row.link, let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? "") { NSWorkspace.shared.open(url) }
         } else if part == "pin" {
