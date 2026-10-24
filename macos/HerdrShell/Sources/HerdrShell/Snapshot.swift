@@ -23,8 +23,12 @@ struct Snapshot: Decodable {
     struct Owner: Decodable { let pane_id: String? }
     struct Ownership: Decodable { let current: Owner? }
     struct Agent: Decodable {
+        struct Group: Decodable {
+            struct Parent: Decodable { var pane_id: String? = nil }
+            var placement: String? = nil; var parent: Parent? = nil; var orphaned = false; var collapsed = false
+        }
         let pane_id: String; let tab_id: String; let agent: String?; let agent_status: String?; var work_status: String? = nil
-        let tokens: [String: String]?; let ownership: Ownership?
+        let tokens: [String: String]?; let ownership: Ownership?; var group: Group? = nil
         let title: String?; let terminal_title: String?; let terminal_title_stripped: String?
     }
     struct Rect: Decodable { let x: Double; let y: Double; let width: Double; let height: Double }

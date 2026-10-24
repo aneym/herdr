@@ -414,7 +414,9 @@ extension HerdrModel {
                 agents: s.agents.filter { $0.tab_id == tab.tab_id }.map { agent in
                     let parentPane = agent.tokens?["parent_pane_id"] ?? agent.ownership?.current?.pane_id
                     let parentTab = s.agents.first { $0.pane_id == parentPane }?.tab_id
-                    return SpacesInput.Agent(status: agent.agent_status ?? "unknown", parent: parentTab)
+                    let group = agent.group
+                    let explicitTab = group?.parent?.pane_id.flatMap { pane in s.agents.first { $0.pane_id == pane }?.tab_id }
+                    return SpacesInput.Agent(status: agent.agent_status ?? "unknown", parent: parentTab, explicitParent: group?.placement == "under" ? explicitTab : nil, handsOn: group?.placement == "hands_on")
                 },
                 focused: tab.tab_id == state.selectedTab, status: tab.agent_status ?? "unknown", pinIndex: tab.pin_index, work: tab.work_status, role: tab.role, sortRank: tab.sort_rank ?? 0,
 request: s.panes.filter { $0.tab_id == tab.tab_id }.compactMap { $0.tokens?["request"] }.first, hidden: tab.hidden ?? false, homeLocation: tab.home_location, runsOn: tab.runs_on, pinSection: tab.pin_section, agentName: tab.agent_card?.name, avatar: tab.agent_card?.avatar_url)

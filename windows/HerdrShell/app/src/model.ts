@@ -15,8 +15,8 @@ export function paneName(pane: Pane, agent?: { agent?: string }): string {
 export interface Rect { x: number; y: number; width: number; height: number }
 export interface Layout { tab_id: string; area: Rect; panes: { pane_id: string; rect: Rect }[]; splits?: { id: string; direction: string; ratio: number; rect: Rect }[]; zoomed?: boolean; focused_pane_id?: string }
 export interface TabPulse { line: string; drifting?: boolean }
-export interface Snapshot { pin_sections?: string[]; overlay?: { tabs?: Record<string, { pulse?: TabPulse }> }; workspaces?: Workspace[]; tabs?: Tab[]; panes?: Pane[]; agents?: { terminal_id: string; pane_id: string; tab_id: string; workspace_id: string; agent: string; agent_status: string; work_status?: string }[]; layouts?: Layout[] }
-export interface SidebarRow { kind: "agent" | "pinned" | "space" | "tab"; id: string; label: string; status: string; hotkey: number | null; section: string; spaceLabel?: string; spaceId?: string; hidden?: boolean; parked?: boolean; pinned?: boolean; face?: Face; request?: string; home?: Tab["home_location"]; runsOn?: string; machine?: string; machineHealth?: string | null; doc?: TabDoc; pinGroup?: string }
+export interface Snapshot { pin_sections?: string[]; overlay?: { tabs?: Record<string, { pulse?: TabPulse }> }; workspaces?: Workspace[]; tabs?: Tab[]; panes?: Pane[]; agents?: { terminal_id: string; pane_id: string; tab_id: string; workspace_id: string; agent: string; agent_status: string; work_status?: string; group?: { placement?: string; parent?: { pane_id?: string }; orphaned?: boolean; collapsed?: boolean } }[]; layouts?: Layout[] }
+export interface SidebarRow { kind: "agent" | "pinned" | "space" | "tab"; id: string; label: string; status: string; hotkey: number | null; section: string; depth?: number; spaceLabel?: string; spaceId?: string; hidden?: boolean; parked?: boolean; pinned?: boolean; face?: Face; request?: string; home?: Tab["home_location"]; runsOn?: string; machine?: string; machineHealth?: string | null; doc?: TabDoc; pinGroup?: string }
 export const tabStatus = (snapshot: Snapshot, tab: Tab): string => tab.work_status ?? snapshot.agents?.find(agent => agent.tab_id === tab.tab_id)?.agent_status ?? tab.agent_status ?? "unknown";
 export const statusRank = (status: string) => ({ blocked: 3, working: 2, done: 1 }[status] ?? 0);
 export function buildSidebar(snapshot: Snapshot, pending: PendingOrders = {}, now = Date.now()): SidebarRow[] {
@@ -34,11 +34,22 @@ export function buildSidebar(snapshot: Snapshot, pending: PendingOrders = {}, no
   };
   // An agent row carries its face and open request; the request folds into the face's dot.
   const agents = tabs.filter(t => t.role === "agent");
+  const agentByPane = new Map((snapshot.agents ?? []).map(a => [a.pane_id, a]));
+  const parentTab = (tab: Tab) => {
+    const agent = (snapshot.agents ?? []).find(a => a.tab_id === tab.tab_id);
+    const group = agent?.group;
+    const pane = group?.placement === "under" ? group.parent?.pane_id : undefined;
+    return pane ? agentByPane.get(pane)?.tab_id : undefined;
+  };
   // Pending drags name only visible rows; hidden pins retain their server slot.
-  pinned(agents.filter(t => !t.hidden), "agent").concat(agents.filter(t => t.hidden).sort(byPin)).forEach(t => {
+  pinned(agents.filter(t => !t.hidden && (!parentTab(t) || (snapshot.agents ?? []).find(a => a.tab_id === t.tab_id)?.group?.placement === "hands_on")), "agent").concat(agents.filter(t => t.hidden).sort(byPin)).forEach(t => {
     const item = row(t, "agent", "AGENTS"), card = t.agent_card;
     const request = snapshot.panes?.filter(p => p.tab_id === t.tab_id).map(p => p.tokens?.request).find(r => r != null);
     rows.push({ ...item, hidden: !!t.hidden, home: t.home_location, ...(t.runs_on ? { runsOn: t.runs_on } : {}), face: faceFor(card?.name ?? item.label, card?.avatar_url), ...(request != null ? { request } : {}) });
+    agents.filter(child => !child.hidden && parentTab(child) === t.tab_id).sort(byPin).forEach(child => {
+      const nested = row(child, "agent", "AGENTS");
+      rows.push({ ...nested, depth: 1, home: child.home_location, face: faceFor(child.agent_card?.name ?? nested.label, child.agent_card?.avatar_url) });
+    });
   });
   const groups = snapshot.pin_sections ?? [];
   pinned(tabs.filter(t => t.role !== "agent" && t.pin_index != null), "pinned").forEach(t => rows.push({ ...row(t, "pinned", "PINNED"), ...(t.pin_section && groups.includes(t.pin_section) ? { pinGroup: t.pin_section } : {}) }));

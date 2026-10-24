@@ -5,7 +5,7 @@ struct SpacesInput: Codable {
         init(id: String, name: String, pinned: Bool = false, collapsed: Bool = false, sortRank: UInt32 = 0, parked: Bool = false) { self.id = id; self.name = name; self.pinned = pinned; self.collapsed = collapsed; self.sortRank = sortRank; self.parked = parked }
         init(from decoder: Decoder) throws { let c = try decoder.container(keyedBy: Field.self); id = try c.decode(String.self, forKey: Field("id")); name = try c.decode(String.self, forKey: Field("name")); pinned = c.value("pinned", false); collapsed = c.value("collapsed", false); sortRank = c.value("sortRank", 0); parked = c.value("parked", false) }
     }
-    struct Agent: Codable { var status: String; var parent: String? = nil }
+    struct Agent: Codable { var status: String; var parent: String? = nil; var explicitParent: String? = nil; var handsOn = false }
     /// `work` is herdr's one answer to "is this chat working" (server app/work_status.rs); nil from older servers.
     struct Tab: Codable { var id: String; var space: String; var label: String; var agents: [Agent] = []; var focused = false; var status = "unknown"; var pinIndex: Int? = nil; var work: String? = nil; var role: String? = nil; var sortRank: UInt32 = 0; var request: String? = nil
         var agentName: String? = nil; var avatar: String? = nil; var hidden = false; var homeLocation: String? = nil
@@ -266,8 +266,11 @@ enum SpacesTree {
         var machines = [""]
         for tab in tabs { let name = machine(tab.id); if !machines.contains(name) { machines.append(name) } }
         return machines.flatMap { name in
-            tabs.filter { machine($0.id) == name && ($0.role == "agent") == agents && (agents || $0.pinIndex != nil) }
-                .sorted { ($0.pinIndex ?? 0) < ($1.pinIndex ?? 0) }
+            tabs.filter {
+                guard machine($0.id) == name && ($0.role == "agent") == agents && (agents || $0.pinIndex != nil) else { return false }
+                guard agents else { return true }
+                return $0.agents.first?.explicitParent == nil || $0.agents.first?.handsOn == true
+            }.sorted { ($0.pinIndex ?? 0) < ($1.pinIndex ?? 0) }
         }
     }
     /// Hidden agents are not draggable; only the two visible pin blocks have drop slots.
@@ -317,7 +320,15 @@ enum SpacesTree {
         var out = agents.isEmpty ? [SpacesRow(id: "agents", kind: .title, title: "agents")] : []
         if !agents.isEmpty {
             out.append(SpacesRow(id: "agentpins", kind: .section, title: "AGENTS"))
-            out += agents.filter { !$0.hidden }.map { pinRow($0, prefix: "agent:") }
+            for agent in agents where !agent.hidden {
+                let row = pinRow(agent, prefix: "agent:")
+                out.append(row)
+                let children = input.tabs.filter { tab in
+                    guard tab.role == "agent", !tab.hidden, tab.agents.first?.handsOn != true else { return false }
+                    return tab.agents.first?.explicitParent == agent.id
+                }.sorted { ($0.pinIndex ?? 0) < ($1.pinIndex ?? 0) }
+                out += children.map { var child = pinRow($0, prefix: "agent:"); child.depth = 1; return child }
+            }
             let hiddenAgents = agents.filter(\.hidden)
             if !hiddenAgents.isEmpty {
                 let attention = !chrome.hiddenAgentsExpanded && hiddenAgents.contains { $0.request != nil || mark($0, overlay.tabs[$0.id] ?? Overlay.Tag(), foldable: false).tone == "blocked" }
