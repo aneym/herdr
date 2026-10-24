@@ -240,11 +240,25 @@ impl App {
                 pin.tab_id == tab_id && pin.role == Some(crate::api::schema::TabRole::Agent)
             });
             agent_tab.then_some(())?;
-            let label = ws.tab_display_name(tab_idx)?;
-            crate::agent_home::label_folders(&label)
-                .into_iter()
-                .map(|folder| crate::agent_home::folder_key(&folder))
-                .find(|key| self.state.agent_homes.contains_key(key))
+            let by_label = ws.tab_display_name(tab_idx).and_then(|label| {
+                crate::agent_home::label_folders(&label)
+                    .into_iter()
+                    .map(|folder| crate::agent_home::folder_key(&folder))
+                    .find(|key| self.state.agent_homes.contains_key(key))
+            });
+            by_label.or_else(|| {
+                tab.layout.pane_ids().into_iter().find_map(|pane_id| {
+                    let terminal = self.state.terminals.get(ws.terminal_id(pane_id)?)?;
+                    let folder = terminal
+                        .cwd
+                        .strip_prefix(self.state.agents_dir.as_ref()?)
+                        .ok()?
+                        .components()
+                        .next()?;
+                    let key = crate::agent_home::folder_key(folder.as_os_str().to_str()?);
+                    self.state.agent_homes.contains_key(&key).then_some(key)
+                })
+            })
         })
     }
 
@@ -547,9 +561,11 @@ impl App {
         &mut self,
         homes: std::collections::HashMap<String, crate::api::schema::HomeLocation>,
         cards: std::collections::HashMap<String, crate::api::schema::TabAgentCard>,
+        agents_dir: std::path::PathBuf,
     ) {
         self.state.agent_homes = homes;
         self.state.agent_cards = cards;
+        self.state.agents_dir = Some(agents_dir);
         for index in 0..self.state.workspaces.len() {
             let workspace = self.workspace_info(index);
             self.emit_event(EventEnvelope {

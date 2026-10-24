@@ -3393,6 +3393,7 @@ impl HeadlessServer {
                 self.app.set_agent_homes(
                     self.agent_home_poller.homes().clone(),
                     self.agent_home_poller.cards().clone(),
+                    agents_dir,
                 );
                 changed = true;
             }
