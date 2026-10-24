@@ -446,7 +446,9 @@ async fn run_client_loop(
         endpoint_mouse_capture_requested: false,
         endpoint_sgr_pixels_requested: false,
         host_theme_updates: Vec::new(),
-        direct_mouse_capture_preference: attach_escape.is_some() && config.mouse_capture_active,
+        direct_mouse_capture_preference: attach_escape.as_ref().is_some_and(|escape| {
+            escape.local_mouse_capture_preference(config.mouse_capture_active)
+        }),
         shell_mouse_capture_preference: config.mouse_capture_active,
         direct_keyboard_protocol: crate::terminal_modes::DirectHostKeyboardState::default(),
         pane_keyboard_report_all: false,
