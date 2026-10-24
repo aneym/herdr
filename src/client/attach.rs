@@ -56,6 +56,17 @@ pub(super) enum AttachSemanticAction {
 }
 
 impl AttachEscapeState {
+    pub(super) fn local_mouse_capture_preference(&self, configured: bool) -> bool {
+        #[cfg(unix)]
+        {
+            return configured && !self.no_escape;
+        }
+        #[cfg(windows)]
+        {
+            configured
+        }
+    }
+
     #[cfg(unix)]
     pub(super) fn without_escape() -> Self {
         Self {

@@ -70,16 +70,17 @@ def archive_suffix(url: str) -> str:
     return next((suffix for suffix in ARCHIVE_SUFFIXES if path.endswith(suffix)), ".archive")
 
 
-def fetch_archive(dependency: Dependency, zig: str, cache_dir: Path, temp_dir: Path) -> str:
+def fetch_archive(dependency: Dependency, zig: str, cache_dir: Path, temp_dir: Path, source_root: Path) -> str:
     archive = temp_dir / f"package{archive_suffix(dependency.url)}"
     run(["curl", "-fL", "--retry", "3", "--retry-delay", "1", dependency.url, "-o", str(archive)])
     return run(
         [zig, "fetch", str(archive), "--global-cache-dir", str(cache_dir)],
+        cwd=source_root,
         capture=True,
     )
 
 
-def fetch_git(dependency: Dependency, zig: str, cache_dir: Path, temp_dir: Path) -> str:
+def fetch_git(dependency: Dependency, zig: str, cache_dir: Path, temp_dir: Path, source_root: Path) -> str:
     url_and_revision = dependency.url.removeprefix("git+")
     repository_url, separator, revision = url_and_revision.rpartition("#")
     if not separator or not repository_url or not revision:
@@ -89,17 +90,18 @@ def fetch_git(dependency: Dependency, zig: str, cache_dir: Path, temp_dir: Path)
     run(["git", "checkout", "--detach", revision], cwd=checkout)
     return run(
         [zig, "fetch", str(checkout), "--global-cache-dir", str(cache_dir)],
+        cwd=source_root,
         capture=True,
     )
 
 
-def fetch(dependency: Dependency, zig: str, cache_dir: Path) -> None:
+def fetch(dependency: Dependency, zig: str, cache_dir: Path, source_root: Path) -> None:
     with tempfile.TemporaryDirectory(prefix="herdr-zig-fetch-") as directory:
         temp_dir = Path(directory)
         if dependency.url.startswith("git+"):
-            actual_hash = fetch_git(dependency, zig, cache_dir, temp_dir)
+            actual_hash = fetch_git(dependency, zig, cache_dir, temp_dir, source_root)
         else:
-            actual_hash = fetch_archive(dependency, zig, cache_dir, temp_dir)
+            actual_hash = fetch_archive(dependency, zig, cache_dir, temp_dir, source_root)
     if actual_hash != dependency.expected_hash:
         raise RuntimeError(
             f"hash mismatch for {dependency.url}:\n"
@@ -132,7 +134,7 @@ def prefetch(source_root: Path, cache_dir: Path, zig: str) -> tuple[int, int]:
 
         for dependency in pending:
             print(f"fetching {dependency.url}", flush=True)
-            fetch(dependency, zig, cache_dir)
+            fetch(dependency, zig, cache_dir, source_root)
             fetched_count += 1
 
 

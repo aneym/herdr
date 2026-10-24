@@ -22,7 +22,10 @@ pub(super) fn apply_reload(
         &mut mouse_capture,
     );
     state.shell_mouse_capture_preference = mouse_capture;
-    state.direct_mouse_capture_preference = state.attach_escape.is_some() && mouse_capture;
+    state.direct_mouse_capture_preference = state
+        .attach_escape
+        .as_ref()
+        .is_some_and(|escape| escape.local_mouse_capture_preference(mouse_capture));
     if state.shell.is_some() && previous_mouse_capture != mouse_capture {
         write_to_server(
             endpoints,
