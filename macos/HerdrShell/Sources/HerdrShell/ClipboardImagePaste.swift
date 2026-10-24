@@ -20,8 +20,7 @@ enum ClipboardImagePaste {
     static func upload(_ png: Data, socketPath: String) -> String? {
         guard !socketPath.isEmpty, png.count <= maxBytes,
               png.starts(with: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) else { return nil }
-        if socketPath == NSHomeDirectory() + "/.config/herdr/herdr.sock",
-           let path = stageLocally(png) { return path }
+        if servedByLocalHerdr(socketPath), let path = stageLocally(png) { return path }
         let body: [String: Any] = [
             "id": "shell:clipboard-image", "method": "clipboard.image.write",
             "params": ["extension": "png", "data_base64": png.base64EncodedString()]
@@ -34,6 +33,32 @@ enum ClipboardImagePaste {
               let result = obj["result"] as? [String: Any],
               let text = result["paste_text"] as? String, !text.isEmpty else { return nil }
         return text
+    }
+
+    static func servedByLocalHerdr(_ socketPath: String) -> Bool {
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        let capacity = MemoryLayout.size(ofValue: address.sun_path)
+        guard socketPath.utf8.count < capacity else { return false }
+        withUnsafeMutableBytes(of: &address.sun_path) { buffer in
+            buffer.copyBytes(from: socketPath.utf8)
+            buffer[socketPath.utf8.count] = 0
+        }
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { return false }
+        defer { close(fd) }
+        let connected = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        guard connected == 0 else { return false }
+        var pid: pid_t = 0
+        var length = socklen_t(MemoryLayout<pid_t>.size)
+        guard getsockopt(fd, SOL_LOCAL, LOCAL_PEERPID, &pid, &length) == 0, pid > 0 else { return false }
+        var path = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        guard proc_pidpath(pid, &path, UInt32(path.count)) > 0 else { return false }
+        return URL(fileURLWithPath: String(cString: path)).lastPathComponent == "herdr"
     }
 
     private static func stageLocally(_ png: Data) -> String? {
