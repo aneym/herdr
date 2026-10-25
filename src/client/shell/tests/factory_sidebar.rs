@@ -527,6 +527,7 @@ fn factory_usage_footer_renders_and_opens_only_usage_urls() {
         HostRow {
             name: "Studio".into(),
             summary: Some("load 198/16".into()),
+            detail: None,
             attention: Attention::Warn,
             url: Some(format!("{url}hosts")),
         },
