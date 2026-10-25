@@ -17,8 +17,13 @@ final class FileChangeMonitor {
         }
     }
 
-    func refresh() {
-        queue.async { [weak self] in self?.schedule() }
+    func refresh(completion: @escaping () -> Void = {}) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.pending?.cancel()
+            self.reload()
+            DispatchQueue.main.async(execute: completion)
+        }
     }
 
     private func schedule() {

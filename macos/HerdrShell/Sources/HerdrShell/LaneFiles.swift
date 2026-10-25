@@ -136,8 +136,8 @@ final class LaneCatalog: ObservableObject {
         [ShellPaths.lanes, ShellPaths.areas, ShellPaths.modes]
     }
 
-    func reload() {
-        monitor.refresh()
+    func reload(completion: @escaping () -> Void = {}) {
+        monitor.refresh(completion: completion)
     }
 
     private func load() {

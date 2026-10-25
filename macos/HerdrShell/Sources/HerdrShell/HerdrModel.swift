@@ -332,22 +332,6 @@ extension HerdrModel {
         DispatchQueue.global(qos: .userInitiated).async { _ = commands.tabSetPinned(tabId: tab, pinned: !pinned) }
     }
 
-    func newPinnedTab(focused: String?, done: @escaping (String) -> Void) {
-        if let focused, !machineLoaded(for: focused) {
-            whenMachineLoaded(focused) { [weak self] in self?.newPinnedTab(focused: focused, done: done) }
-            return
-        }
-        let workspace = focused.flatMap { id in source(for: id)?.tabs.first { $0.tab_id == id }?.workspace_id }
-            ?? snapshot?.workspaces.first?.workspace_id
-        guard let workspace else { return }
-        let commands = HerdrCommands(socketPath: env["HERDR_SOCKET_PATH"] ?? "")
-        DispatchQueue.global(qos: .userInitiated).async {
-            guard let made = commands.tabCreate(workspaceId: workspace, cwd: nil) else { log("new pinned tab failed"); return }
-            guard commands.pinAtEnd(tabId: made.tabId) else { return }
-            DispatchQueue.main.async { done(made.tabId) }
-        }
-    }
-
     private static func spaces(_ s: Snapshot) -> [SpacesInput.Space] {
         s.workspaces.map {
             SpacesInput.Space(id: $0.workspace_id, name: $0.label ?? $0.workspace_id, pinned: $0.tokens?["pinned"] == "true", collapsed: $0.tokens?["hidden"] == "true", sortRank: $0.sort_rank ?? 0, parked: $0.parked ?? false)

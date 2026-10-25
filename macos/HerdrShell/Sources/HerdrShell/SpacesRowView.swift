@@ -14,7 +14,6 @@ struct SpacesRowView: View {
     /// Section focus toggle ("◎" or "✕"); nil when the section has none.
     var focusMark: String? = nil
     var pinned = false
-    /// The pointer is over this row. Pinned-section rows show their unpin toggle only then.
     var hovered = false
     var showResume = false
     var doc: TabDoc? = nil
@@ -25,7 +24,6 @@ struct SpacesRowView: View {
     var resume: () -> Void = {}
 
     static let chevronWidth: CGFloat = 9
-    /// One slot for a state glyph or an agent face, so AGENTS and PINNED titles line up.
     static let glyphWidth: CGFloat = ShellFace.size
     static let alertWidth: CGFloat = 7
     /// Hit width of a trailing pin, + or chevron.
@@ -37,11 +35,8 @@ struct SpacesRowView: View {
     static let titleMinWidth: CGFloat = 96
 
     private var isFooter: Bool { row.kind == .footerUsage || row.kind == .footerHost }
-    /// Tab, section and Hidden-agent header rows hold the leading chevron slot, so their
-    /// labels share one column. The Hidden header keeps its actual chevron trailing.
-    /// Runs never open; their indent already nests them.
-    private var treeRow: Bool { row.kind == .tab || row.kind == .automation || row.kind == .section || row.id == "hiddenagents" }
-    private var agentRow: Bool { row.id.hasPrefix("agent:") || row.id.hasPrefix("hiddenagent:") }
+    private var treeRow: Bool { row.kind == .tab || row.kind == .automation || row.kind == .section }
+    private var agentRow: Bool { row.id.hasPrefix("agent:") }
 
     var body: some View {
         if row.kind == .divider {
@@ -110,12 +105,7 @@ struct SpacesRowView: View {
             }
             // Agent machine badges follow the home glyph (spec line 98).
             if agentRow, let machine = row.badge { badge(machine) }
-            if row.id == "hiddenagents" {
-                if row.alert == "act" {
-                    Circle().fill(t.accent).frame(width: ShellFace.dot, height: ShellFace.dot)
-                        .accessibilityLabel("Hidden agent needs attention")
-                }
-            } else if row.kind != .goal, !isFooter, row.kind != .title {
+            if row.kind != .goal, !isFooter, row.kind != .title {
                 Text(row.alert == "none" ? "" : "!").fontWeight(.bold)
                     .foregroundStyle(row.alert == "act" ? t.bad : t.warn)
                     .frame(width: Self.alertWidth)

@@ -93,9 +93,7 @@ final class TestHook {
                 // As the sidebar: a tab row's pin is a server fact, a space row's a local preference.
                 if row.kind == .tab, let tab = row.tab { c.model.togglePin(tab) } else { c.state.spacesChrome.toggle("pin:" + String(row.id.dropFirst(6))) }
             }
-            else if part == "plus", row.id == "pinned" {
-                c.model.newPinnedTab(focused: c.state.selectedTab, done: c.selectWhenListed)
-            } else if part == "plus" {
+            else if part == "plus" {
                 let commands = c.commands
                 let space = String(row.id.dropFirst(6))
                 DispatchQueue.global(qos: .userInitiated).async {
