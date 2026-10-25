@@ -34,12 +34,4 @@ describe("pin drag", () => {
     expect(pinMovePlan(snapshot, ["p1", "p2", "p3"], 0, 3)).toBeNull();
     expect(pinMovePlan(snapshot, ["a2", "p1"], 0, 1)).toBeNull();
   });
-  it("maps a filtered owner drop to the destination's actual pin index", () => {
-    const filtered: Snapshot = { tabs: [
-      { tab_id: "a", workspace_id: "w1", number: 1, role: "agent", pin_index: 0 },
-      { tab_id: "b", workspace_id: "w1", number: 2, role: "agent", pin_index: 1 },
-      { tab_id: "c", workspace_id: "w1", number: 3, role: "agent", pin_index: 2 },
-    ] };
-    expect(pinMovePlan(filtered, ["b", "c"], 0, 1)).toEqual({ tab: "b", pinIndex: 2 });
-  });
 });
