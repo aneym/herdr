@@ -78,7 +78,7 @@ with tempfile.TemporaryDirectory(prefix="restart-api-", dir=os.environ.get("TMPD
     worker = threading.Thread(target=serve, daemon=True)
     worker.start()
     source = pathlib.Path(tmp) / "transport.swift"
-    files = ["SpacesTree.swift", "MachineMerge.swift", "DeskModel.swift", "Snapshot.swift", "Machines.swift", "HerdrSocket.swift", "HerdrClient.swift", "PaneRestart.swift"]
+    files = ["SpacesModels.swift", "HomeRows.swift", "SpacesTree.swift", "SpaceScope.swift", "Automations.swift", "MachineMerge.swift", "Snapshot.swift", "Machines.swift", "HerdrSocket.swift", "HerdrClient.swift", "NewPanes.swift", "PaneRestart.swift"]
     text = "import Foundation\nfunc log(_ message: String) {}\n" + "\n".join((ROOT / "Sources/HerdrShell" / name).read_text() for name in files)
     text += "\nlet commands = HerdrCommands(socketPath: " + json.dumps(path) + ")\n"
     text += '''

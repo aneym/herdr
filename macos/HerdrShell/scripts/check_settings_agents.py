@@ -28,7 +28,7 @@ def check(name, ok, detail=''):
 
 with tempfile.TemporaryDirectory(prefix='settings-agents-') as directory:
     driver = pathlib.Path(directory) / 'dump'
-    sources = ['SpacesTree.swift', 'MachineMerge.swift', 'SettingsAgents.swift']
+    sources = ['SpacesModels.swift', 'HomeRows.swift', 'SpacesTree.swift', 'SpaceScope.swift', 'Automations.swift', 'MachineMerge.swift', 'SettingsAgents.swift']
     subprocess.run(['swiftc', *[str(ROOT / 'Sources/HerdrShell' / s) for s in sources],
                     str(ROOT / 'scripts/settings_agents_dump.swift'), '-o', str(driver)], check=True)
 

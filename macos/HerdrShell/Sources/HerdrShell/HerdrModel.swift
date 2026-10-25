@@ -367,7 +367,10 @@ extension HerdrModel {
     }
 
     func spacesRows(state: SidebarState) -> [SpacesRow] {
-        guard let s = snapshot else { return [SpacesRow(id: "agents", kind: .title, title: "agents")] }
+        guard let s = snapshot else {
+            return SpacesTree.build(SpacesInput(spaces: [], tabs: [], focusedTab: nil), overlay: Overlay(),
+                                    chrome: state.spacesChrome, now: Date().timeIntervalSince1970)
+        }
         var input = SpacesInput(spaces: Self.spaces(s), tabs: s.tabs.map { tab in
             SpacesInput.Tab(id: tab.tab_id, space: tab.workspace_id, label: tab.label ?? tab.tab_id,
                 agents: s.agents.filter { $0.tab_id == tab.tab_id }.map { agent in

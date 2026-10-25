@@ -20,7 +20,7 @@ SRC = ROOT / "Sources/HerdrShell"
 BUILD = pathlib.Path.home() / ".cache/herdr-build/lane-files"
 BUILD.mkdir(parents=True, exist_ok=True)
 DRIVER = BUILD / "lane_files"
-subprocess.run(["swiftc", "-parse-as-library", str(SRC / "LaneFiles.swift"), str(SRC / "SpacesTree.swift"),
+subprocess.run(["swiftc", "-parse-as-library", str(SRC / "LaneFiles.swift"), str(SRC / "FileChangeMonitor.swift"), *(str(SRC / name) for name in ("SpacesModels.swift", "HomeRows.swift", "SpacesTree.swift", "SpaceScope.swift", "Automations.swift")),
                 str(ROOT / "scripts/lane_files.swift"), "-o", str(DRIVER)], check=True)
 failures = []
 

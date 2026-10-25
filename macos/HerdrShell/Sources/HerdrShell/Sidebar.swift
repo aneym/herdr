@@ -248,8 +248,6 @@ struct SidebarView: View {
                         case .pin, .unpin: spacesClick(row, part: "pin")
                         case .addAgent: model.setAgentRole(tab, true)
                         case .removeAgent: model.setAgentRole(tab, false)
-                        case .hide: model.setAgentHidden(tab, true)
-                        case .show: model.setAgentHidden(tab, false)
                         }
                     }
                 }
@@ -724,7 +722,7 @@ extension Color {
 }
 
 enum RowMenu: String {
-    case rename = "Rename…", info = "Show info", resume = "Resume", park = "Park…", approve = "Approve scope…", pin = "Pin", unpin = "Unpin", addAgent = "Add to Agents", removeAgent = "Remove from Agents", hide = "Hide", show = "Show in Agents"
+    case rename = "Rename…", info = "Show info", resume = "Resume", park = "Park…", approve = "Approve scope…", pin = "Pin", unpin = "Unpin", addAgent = "Add to Agents", removeAgent = "Remove from Agents"
 
     static func items(for row: SpacesRow, model: HerdrModel) -> [RowMenu] {
         guard let tab = row.tab else { return [] }
@@ -737,7 +735,6 @@ enum RowMenu: String {
         if row.kind == .tab {
             out.append(model.isPinned(tab) ? .unpin : .pin)
             out.append(model.isAgent(tab) ? .removeAgent : .addAgent)
-            if let hidden = row.setsHidden { out.append(hidden ? .hide : .show) }
         }
         return out
     }

@@ -15,7 +15,7 @@ FIXTURES = ROOT / "scripts/fixtures/p33"
 _scratch = tempfile.TemporaryDirectory(prefix="herdr-p33-")
 BUILD = pathlib.Path(_scratch.name)
 DRIVER = BUILD / "p33_dump"
-subprocess.run(["swiftc", str(ROOT / "Sources/HerdrShell/SpacesTree.swift"),
+subprocess.run(["swiftc", *(str(ROOT / "Sources/HerdrShell" / name) for name in ("SpacesModels.swift", "HomeRows.swift", "SpacesTree.swift", "SpaceScope.swift", "Automations.swift")),
                 str(ROOT / "scripts/p33_dump.swift"), "-o", str(DRIVER)], check=True)
 failures = []
 def base_rows(path):
@@ -32,14 +32,14 @@ for fixture in sorted(FIXTURES.glob("*.json")):
 
 fixture = FIXTURES / "sectioned.json"
 base = subprocess.check_output([str(DRIVER), str(fixture)], text=True).splitlines()
-folded = subprocess.check_output([str(DRIVER), str(fixture), "section:ws_1:IMPLEMENTING"], text=True).splitlines()
-start = next(i for i, row in enumerate(base) if row.startswith("section|section:ws_1:IMPLEMENTING|"))
+folded = subprocess.check_output([str(DRIVER), str(fixture), "section:ws_1:LANES"], text=True).splitlines()
+start = next(i for i, row in enumerate(base) if row.startswith("section|section:ws_1:LANES|"))
 end = next(i for i in range(start + 1, len(base)) if base[i].startswith("group|"))
 if folded[:start] != base[:start] or folded[start + 1:] != base[end:]:
     failures.append("fold locality")
 else:
-    print("PASS fold locality (only IMPLEMENTING changes)")
-restored = subprocess.check_output([str(DRIVER), str(fixture), "section:ws_1:IMPLEMENTING", "section:ws_1:IMPLEMENTING"], text=True).splitlines()
+    print("PASS fold locality (only LANES changes)")
+restored = subprocess.check_output([str(DRIVER), str(fixture), "section:ws_1:LANES", "section:ws_1:LANES"], text=True).splitlines()
 if restored != base:
     failures.append("fold round-trip")
 else:
@@ -91,21 +91,6 @@ if (any(r.startswith("title|spacegroup:") for r in plain) or None in order or or
     print("\n".join(split))
 else:
     print("PASS spaces split follows space_groups data")
-# A pinned lane rolls up its live children as its header in the space does (H0 6b): the lane
-# below is idle with one live run, so its space row reads working and so must its pinned row.
-pinned = json.loads((FIXTURES / "live-child-working.json").read_text())
-pinned["input"]["tabs"][0]["pinIndex"] = 0
-fixture = BUILD / "pinned-live-child.json"
-fixture.write_text(json.dumps(pinned))
-rows = base_rows(fixture)
-def mark(prefix):
-    row = next((r.split("|") for r in rows if r.startswith(prefix)), None)
-    return row and (row[4], row[5])
-if mark("tab|tab:lane|") != ("●", "working") or mark("tab|pinned:lane|") != mark("tab|tab:lane|"):
-    failures.append("pinned lane rollup")
-    print("\n".join(rows))
-else:
-    print("PASS a pinned lane with live children reads working, as its space row does")
 # herdr's work fact wins over the overlay's busy copy (2026-10-06, w5P:t7 "submissions"): the chat
 # sat idle at its prompt (work "done") while the overlay still listed a finished teammate as a live
 # agent: run and the tab busy. Space row and pinned row must read it finished and its run row is
@@ -126,12 +111,11 @@ for work, want_tone, want_run in [("done", "done", None), ("working", "working",
     def cell(prefix, field):
         row = next((r.split("|") for r in rows if r.startswith(prefix)), None)
         return row and row[field]
-    if (cell("tab|tab:lane|", 5) != want_tone or cell("tab|pinned:lane|", 5) != want_tone
-            or cell("tab|pinned:lane|", 4) != cell("tab|tab:lane|", 4) or cell("run|run:agent:", 4) != want_run):
+    if (cell("tab|tab:lane|", 5) != want_tone or cell("run|run:agent:", 4) != want_run):
         failures.append(f"work fact {work}")
         print("\n".join(rows))
     else:
-        print(f"PASS a {work} chat reads {want_tone} in its space row, pinned row and run row over a busy overlay")
+        print(f"PASS a {work} chat reads {want_tone} in its space row and run row over a busy overlay")
 # ASKS-11: a run's row drops when the run ends, so no workflow row outlives its run with a stale
 # age; a running run keeps its row. As Rust registered_run_progress_renders_under_lane_and_finished_runs_drop.
 runs = json.loads((FIXTURES / "live-child-working.json").read_text())

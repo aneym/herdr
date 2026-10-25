@@ -5,7 +5,17 @@ struct SpacesInput: Codable {
         init(id: String, name: String, pinned: Bool = false, collapsed: Bool = false, sortRank: UInt32 = 0, parked: Bool = false) { self.id = id; self.name = name; self.pinned = pinned; self.collapsed = collapsed; self.sortRank = sortRank; self.parked = parked }
         init(from decoder: Decoder) throws { let c = try decoder.container(keyedBy: Field.self); id = try c.decode(String.self, forKey: Field("id")); name = try c.decode(String.self, forKey: Field("name")); pinned = c.value("pinned", false); collapsed = c.value("collapsed", false); sortRank = c.value("sortRank", 0); parked = c.value("parked", false) }
     }
-    struct Agent: Codable { var status: String; var parent: String? = nil; var explicitParent: String? = nil; var handsOn = false }
+    struct Agent: Codable {
+        var status: String; var parent: String? = nil; var explicitParent: String? = nil; var handsOn = false
+        init(status: String, parent: String? = nil, explicitParent: String? = nil, handsOn: Bool = false) {
+            self.status = status; self.parent = parent; self.explicitParent = explicitParent; self.handsOn = handsOn
+        }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: Field.self)
+            status = try c.decode(String.self, forKey: Field("status"))
+            parent = c.optional("parent"); explicitParent = c.optional("explicitParent"); handsOn = c.value("handsOn", false)
+        }
+    }
     struct Tab: Codable { var id: String; var space: String; var label: String; var agents: [Agent] = []; var focused = false; var status = "unknown"; var pinIndex: Int? = nil; var work: String? = nil; var role: String? = nil; var sortRank: UInt32 = 0; var request: String? = nil
         var agentName: String? = nil; var avatar: String? = nil; var hidden = false; var homeLocation: String? = nil
         var runsOn: String? = nil
@@ -94,12 +104,12 @@ extension KeyedDecodingContainer where Key == Field {
 
 struct SpacesChrome: Codable {
     var collapsedSections: Set<String> = []; var expandedGroups: Set<String> = []; var expandedTabs: Set<String> = []; var collapsedTabs: Set<String> = []
-    var pinnedSpaces: Set<String> = []; var collapsedSpaces: Set<String> = []; var expandedParkedSpaces: Set<String> = []; var hiddenExpanded = false; var hiddenAgentsExpanded = false; var goalFilter: String?; var focusedSection: [String: String] = [:]
+    var pinnedSpaces: Set<String> = []; var collapsedSpaces: Set<String> = []; var expandedParkedSpaces: Set<String> = []; var hiddenExpanded = false; var goalFilter: String?; var focusedSection: [String: String] = [:]
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Field.self)
         collapsedSections = c.value("collapsedSections", []); expandedGroups = c.value("expandedGroups", []); expandedTabs = c.value("expandedTabs", []); collapsedTabs = c.value("collapsedTabs", [])
-        pinnedSpaces = c.value("pinnedSpaces", []); collapsedSpaces = c.value("collapsedSpaces", []); expandedParkedSpaces = c.value("expandedParkedSpaces", []); hiddenExpanded = c.value("hiddenExpanded", false); hiddenAgentsExpanded = c.value("hiddenAgentsExpanded", false); goalFilter = c.optional("goalFilter"); focusedSection = c.value("focusedSection", [:])
+        pinnedSpaces = c.value("pinnedSpaces", []); collapsedSpaces = c.value("collapsedSpaces", []); expandedParkedSpaces = c.value("expandedParkedSpaces", []); hiddenExpanded = c.value("hiddenExpanded", false); goalFilter = c.optional("goalFilter"); focusedSection = c.value("focusedSection", [:])
         if let legacy: String = c.optional("focusedSection"), let split = legacy.lastIndex(of: ":") { focusedSection[String(legacy[..<split])] = String(legacy[legacy.index(after: split)...]) }
     }
     func anySpaceExpanded(_ spaces: [SpacesInput.Space]) -> Bool {
@@ -114,18 +124,13 @@ struct SpacesChrome: Codable {
             expandedParkedSpaces.formUnion(spaces.filter(\.parked).map(\.id))
         }
     }
-    mutating func reveal(space: String, parked: Bool, selected: String? = nil, rows: [SpacesRow] = [], hiddenAgent: Bool = false) -> Bool {
-        if hiddenAgent || selected.map({ selected in rows.contains { $0.id == "hiddenagent:" + selected } }) == true {
-            let changed = !hiddenAgentsExpanded; hiddenAgentsExpanded = true; return changed
-        }
-        if let selected, rows.contains(where: { $0.id == "pinned:" + selected || $0.id == "agent:" + selected }) { return false }
+    mutating func reveal(space: String, parked: Bool) -> Bool {
         let unfolded = collapsedSpaces.remove(space) != nil
         let unparked = parked && expandedParkedSpaces.insert(space).inserted
         return unfolded || unparked
     }
     mutating func toggle(_ key: String, open: Bool? = nil) {
         if key.hasPrefix("all:") { focusedSection.removeValue(forKey: String(key.dropFirst(4))); return }
-        if key == "hiddenagents" { hiddenAgentsExpanded.toggle(); return }
         if key == "hidden" { hiddenExpanded.toggle(); return }
         let parts = key.split(separator: ":", maxSplits: 1).map(String.init)
         guard parts.count == 2 else { return }
@@ -157,7 +162,6 @@ struct SpacesRow: Identifiable, Equatable {
     var home: String?
     var runsOn: String?
     var place: String? { runsOn.flatMap { $0 == "box" || badge == nil ? $0 : nil } }
-    var setsHidden: Bool? { id.hasPrefix("agent:") ? true : id.hasPrefix("hiddenagent:") ? false : nil }
     var face: Face?
     var hover: String?
     struct Face: Equatable { var initial: String; var tint: Int; var avatar: String? }
@@ -180,7 +184,7 @@ struct SpacesRow: Identifiable, Equatable {
             faceField = ["face:" + face.initial + ":" + String(face.tint) + picture]
         }
         var dotField: [String] = []
-        if id == "hiddenagents", alert == "act" { dotField = ["dot:accent"] } else if let faceDot { dotField = ["dot:" + faceDot] } else if let trailingRequest { dotField = ["request:" + trailingRequest] }
+        if let faceDot { dotField = ["dot:" + faceDot] } else if let trailingRequest { dotField = ["request:" + trailingRequest] }
         let badgeField: [String] = badge.map { ["@" + $0 + (badgeState.map { ":" + $0 } ?? "")] } ?? []
         var output = fields
         output.append(contentsOf: faceField)

@@ -11,8 +11,10 @@ func log(_ s: String) {}
         print("areas " + ShellPaths.areas)
         fflush(stdout)
         let catalog = LaneCatalog()
+        catalog.start()
         while readLine() != nil {
             catalog.reload()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.3))
             let groups = catalog.snapshot.spaceGroups.map { $0.map { $0.name + "=" + $0.spaces.joined(separator: ",") }.joined(separator: ";") }
             print("groups " + (groups ?? "nil"))
             fflush(stdout)
