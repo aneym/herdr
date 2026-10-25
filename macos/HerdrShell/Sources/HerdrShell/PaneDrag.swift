@@ -1,7 +1,6 @@
 import AppKit
 import QuartzCore
 
-/// Pure chip placement: preserve the offset, flip overflowing axes, then clamp to the inset.
 func paneDragChipFrame(pointer: CGPoint, size: CGSize, bounds: CGSize) -> CGRect {
     let offset = ShellMotion.chipOffset, inset = ShellMotion.zoneInset
     var x = pointer.x + offset, y = pointer.y + offset
@@ -10,7 +9,6 @@ func paneDragChipFrame(pointer: CGPoint, size: CGSize, bounds: CGSize) -> CGRect
     return CGRect(x: max(inset, x), y: max(inset, y), width: size.width, height: size.height)
 }
 
-/// Per-window gesture owner; snapshots and pane.place remain layout authority.
 final class PaneDrag: NSObject {
     enum Phase: String { case idle, pressed, lifted, dropping, settling, cancelling }
     enum Zone: Equatable {
@@ -32,32 +30,20 @@ final class PaneDrag: NSObject {
     private var sourceGlyph: ShellState = .asleep
     private var lastHostSize = CGSize.zero
     private var zone: Zone?, lastZone: Zone?
-    /// Check hook only (check_pane_drag_end.py): hold a drop's call before it is sent, as a slow link would, until
-    /// `sendHeldDrop()`. Snapshots keep arriving meanwhile.
     var holdDrops = false
-    /// Inject a failed network edge without sending a mutation (check hook only).
     var failNextDrop = false
     var loseNextDrop = false
     private var heldDrop: (() -> Void)?
-    /// Check hook only: hold a drop's reply once it is in, until `sendHeldReply()`, so the drop's own snapshot can land
-    /// first. A held reply outlives the drop's end, so a check can deliver it late.
     var holdReplies = false
     private var heldReply: (generation: Int, answer: () -> Void)?
-    /// Replies handled, and how many of them came for a drop that had already ended (and so changed nothing).
     private var repliesHandled = 0, repliesIgnored = 0
-    /// While a sent drop waits for its reply the host keeps the boxes it had at the release: snapshots that land
-    /// meanwhile stay in the model (the newest wins) and only their caps apply. `frozenEpoch` tells whether one did.
     private(set) var holdsLayout = false
     private var frozenEpoch = 0
-    /// The host size at the release: a pending drop holds its boxes and terminal sizes at this size.
     private var dropSize = CGSize.zero
-    /// How long a sent drop waits for its reply, the same as the Windows Shell.
     static let replyTimeout: TimeInterval = 4
     private var pointer = CGPoint.zero, start = CGPoint.zero
     private var keyboard = false, keyboardTarget: String?
     private var sent: [[String: Any]] = [] {
-        // Every call also lands in `sendLog`, which a new drag does not clear, so a check can see what a
-        // drag's end sent even when the next drag begins in the same turn.
         didSet {
             guard sent.count > oldValue.count else { return }
             for call in sent[oldValue.count...] { sendSeq += 1; sendLog.append(call.merging(["seq": sendSeq]) { a, _ in a }) }
@@ -65,7 +51,6 @@ final class PaneDrag: NSObject {
         }
     }
     private var sendLog: [[String: Any]] = [], sendSeq = 0
-    /// The chip glyph's color as last painted (check hook).
     private var chipPaintedTone: UInt32?
     private var chipFrame: CGRect?
     private var supported: [String: Bool] = [:], probing = Set<String>()
@@ -85,7 +70,6 @@ final class PaneDrag: NSObject {
     }
     private var dwell: Dwell?
     private var springSelection = false, sprung = false
-    // Keep a quick cancel's origin focus behind the spring's destination focus on the wire.
     private let tabFocusQueue = DispatchQueue(label: "herdr.pane-drag.tab-focus")
     var reduceOverride: Bool?
     private var reduce: Bool { reduceOverride ?? NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
@@ -138,8 +122,6 @@ final class PaneDrag: NSObject {
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .leftMouseDragged, .leftMouseUp, .rightMouseDown, .rightMouseUp]) { [weak self] e in
             guard let self, let owner = self.owner, e.window === owner.window else { return e }
-            // A press on the panes ends a drop still waiting on its reply, quietly, before the window hit-tests it:
-            // the press then lands on the flushed layout, so a cap press drags from there and a terminal press focuses.
             if e.type == .leftMouseDown {
                 if self.phase == .dropping, owner.host.bounds.contains(owner.host.convert(e.locationInWindow, from: nil)) { self.cancel() }
                 return e
@@ -156,7 +138,6 @@ final class PaneDrag: NSObject {
     }
     func press(pane: String, at point: CGPoint) {
         guard let owner else { return }
-        // A new drag ends a drop still waiting on its reply, quietly.
         if phase == .dropping { cancel() }
         source = pane
         probe()
@@ -193,9 +174,8 @@ final class PaneDrag: NSObject {
         if owner.state.sidebarVisible, !view.isHidden, view.bounds.contains(p),
            let row = owner.state.rowFrames.first(where: { $0.value.contains(rowPoint) })?.key {
             let id = String(row.dropFirst(row.hasPrefix("tab:") ? 4 : 6))
-            if (row.hasPrefix("tab:") || row.hasPrefix("space:")), PinDrag.machine(of: id) == PinDrag.machine(of: source ?? "") {
+            if (row.hasPrefix("tab:") || row.hasPrefix("space:")), Machines.split(id)?.machine == Machines.split(source ?? "")?.machine {
                 updateDwell(tab: row.hasPrefix("tab:") ? id : nil)
-                // The source tab remains a dwell target (spring back), never a drop target.
                 setZone(row.hasPrefix("tab:") ? (id == originTab ? nil : .intoTab(id)) : .newTabIn(id)); return
             }
         }
@@ -317,13 +297,9 @@ final class PaneDrag: NSObject {
         case .newTabIn(let ws): method = "pane.move"; p = ["pane_id": source, "destination": ["type": "new_tab", "workspace_id": ws], "focus": true]
         default: method = "pane.place"; p = params(z, dry: false) ?? [:]
         }
-        // No pane.focus: pane.swap focuses the source on the server, and pane.place and pane.move carry focus:true.
         sent.append(["method": method, "params": p])
         let commands = owner.commands, gen = generation
-        // The drop ends with the server's answer to this call, never with a snapshot: snapshots that land while it
-        // is pending are buffered, and the answer settles the panes once from where they stood at the release.
         let send = {
-            // No reply in time: restore spring selection (Windows parity), but never roll back pane layout.
             DispatchQueue.main.asyncAfter(deadline: .now() + PaneDrag.replyTimeout) { [weak self] in
                 guard let self, self.generation == gen, self.phase == .dropping, self.heldReply?.generation != gen else { return }
                 self.restoreAfterFailedDrop(); self.cancel()
@@ -339,12 +315,8 @@ final class PaneDrag: NSObject {
                     let answer = { [weak self] in
                         guard let self else { return }
                         self.repliesHandled += 1
-                        // A drop that already ended (timeout, tab switch, offline, a new drag) ignores its reply entirely.
                         guard self.generation == gen, self.phase == .dropping else { self.repliesIgnored += 1; return }
-                        // A refusal (an error, or changed:false such as a pane gone) moved nothing: the buffered snapshot
-                        // shows as it is, then the chip goes back.
                         if refused { _ = self.unfreeze(); self.owner?.refreshHost(); self.animateCancel(); return }
-                        // With no reply at all the server may still have applied it: end without a rollback.
                         if reply?["result"] == nil { self.restoreAfterFailedDrop(); self.cancel(); return }
                         let buffered = self.unfreeze()
                         self.owner?.applyDropReply(PaneDrag.layouts(reply), buffered: buffered)
@@ -360,14 +332,12 @@ final class PaneDrag: NSObject {
     }
     func sendHeldDrop() { let send = heldDrop; heldDrop = nil; send?() }
     func sendHeldReply() { let held = heldReply; heldReply = nil; held?.answer() }
-    /// Ends the freeze; true when any snapshot for the tab landed while it held.
     private func unfreeze() -> Bool {
         guard holdsLayout else { return false }
         holdsLayout = false
         guard let owner, let tab = owner.state.selectedTab else { return false }
         return owner.model.snapshotEpoch(for: tab) != frozenEpoch
     }
-    /// The layouts a drop's reply carries: pane.swap's `layout`, or pane.place's and pane.move's target and source.
     private static func layouts(_ reply: [String: Any]?) -> [Snapshot.Layout] {
         guard let result = reply?["result"] as? [String: Any] else { return [] }
         let answer = ["place", "swap", "move_result"].lazy.compactMap { result[$0] as? [String: Any] }.first ?? [:]
@@ -376,7 +346,6 @@ final class PaneDrag: NSObject {
                 .flatMap { try? JSONDecoder().decode(Snapshot.Layout.self, from: $0) }
         }
     }
-    /// The server answered and changed nothing: an error, or `changed: false` in the place, swap or move result.
     private static func refused(_ reply: [String: Any]?) -> Bool {
         guard let reply else { return false }
         guard let result = reply["result"] as? [String: Any] else { return true }
@@ -385,12 +354,10 @@ final class PaneDrag: NSObject {
     }
     func cancel() {
         guard phase == .pressed || phase == .lifted || phase == .dropping else { return }
-        // Once sent, the server may already have committed the drop. Never animate a rollback.
         if phase == .dropping {
             generation += 1; inFlight = nil
             let frozen = holdsLayout
             _ = unfreeze(); finish()
-            // The buffered snapshot shows as it is.
             if frozen { owner?.refreshHost() }
             return
         }
@@ -399,7 +366,6 @@ final class PaneDrag: NSObject {
     private func restoreAfterFailedDrop() {
         if sprung, let originTab, owner?.state.selectedTab != originTab { focusSpringTab(originTab) }
     }
-    /// The chip springs back to the source cap. Also ends a drop the server refused, which moved nothing.
     private func animateCancel() {
         dwell = nil
         if sprung, let originTab, owner?.state.selectedTab != originTab {
@@ -415,10 +381,8 @@ final class PaneDrag: NSObject {
         draw()
     }
     func selectionChanging(to tab: String?) {
-        // A drop still waiting on its reply ends quietly too: its chip and ghost belong to the tab being left.
         if !springSelection, phase == .pressed || phase == .lifted || phase == .dropping,
            tab != owner?.state.selectedTab {
-            // A foreign selection owns the next tab. Do not nest an origin selection inside it.
             sprung = false
             cancel()
         }
@@ -466,13 +430,10 @@ final class PaneDrag: NSObject {
     func layoutWillApply(old: [String: NSRect], new: [String: NSRect], sameTab: Bool, fromDrop: Bool = false) {
         layoutGeneration += 1; cache = [:]; rejected = []
         guard let owner else { return }
-        // A layout landing during an accepted drop's settle retargets it from the boxes drawn last (`old`).
         let retarget = phase == .settling && motions.contains { $0.kind == "settle" || $0.kind == "crossfade" }
         let sameSize = lastHostSize == owner.host.bounds.size
         lastHostSize = owner.host.bounds.size
-        // Only an accepted drop settles, once. Snapshots after its settle apply at once.
         let canAnimate = (fromDrop || retarget) && sameTab && sameSize && Set(old.keys) == Set(new.keys) && !owner.resizer.isBusy && !owner.window.inLiveResize
-        // Under Reduce Motion a retarget keeps the running fade; the panes just take their new frames.
         if !(canAnimate && retarget && reduce) {
             motions.removeAll { $0.kind == "settle" || $0.kind == "crossfade" }
             if canAnimate {
@@ -485,9 +446,6 @@ final class PaneDrag: NSObject {
         boxes = new
         if phase == .idle && !motions.isEmpty { phase = .settling }
     }
-    /// The drop is in: the zone fades out (a crossfade over reducedFadeMs under Reduce Motion) and tick() finishes once
-    /// it and any settle are done. Every drop ends here, also one whose layout brings no settle or crossfade, such as a
-    /// move into another tab.
     private func settle() {
         phase = .settling
         motions.removeAll { $0.pane == source && $0.kind == "fade" }
@@ -497,9 +455,6 @@ final class PaneDrag: NSObject {
         draw()
         if phase == .lifted { requestDryRun() }
     }
-    /// The host is about to lay out at `size`. A window resize or a sidebar or side column change while a drop waits on
-    /// its reply ends the drop quietly first, so the release-time boxes never rescale and no terminal resizes while
-    /// they hold: the buffered snapshot is laid out, at the new size, instead.
     func hostWillLayout(_ size: CGSize) {
         guard phase == .dropping, holdsLayout, size != dropSize else { return }
         cancel()
@@ -559,8 +514,6 @@ final class PaneDrag: NSObject {
         evaluateDwell()
         draw()
         if prune {
-            // Retain the completed ghost fade until the last moving surface ends. Removing it
-            // at fadeMs would paint alpha 1 again for the rest of the 200 ms settle.
             let ended = motions.allSatisfy { elapsed($0) >= $0.duration }
             motions.removeAll { elapsed($0) >= $0.duration && !($0.pane == nil && $0.kind == "fade" && phase == .settling) }
             if ended && phase == .settling { finish(); return }
@@ -614,7 +567,6 @@ final class PaneDrag: NSObject {
             return 3 * u * u * t * a + 3 * u * t * t * b + t * t * t
         }
         var low: CGFloat = 0, high: CGFloat = 1
-        // Invert the token curve's x coordinate; deterministic under the frozen clock.
         for _ in 0..<20 {
             let middle = (low + high) / 2
             if bezier(middle, points[0], points[2]) < value { low = middle } else { high = middle }
@@ -660,7 +612,6 @@ final class PaneDrag: NSObject {
             "motion": ["frozenMs": frozenMs ?? (NSNull() as Any), "reduce": reduce,
                        "active": motions.map { ["pane": $0.pane ?? (NSNull() as Any), "kind": $0.kind, "elapsedMs": elapsed($0)] }]]
     }
-    /// The sidebar row's glyph for the source's state (SpacesTree.statusGlyph), not a set of its own.
     private var chipGlyph: String { SpacesTree.statusGlyph(sourceGlyph.sidebarStatus) }
     private var chipText: String { chipGlyph + " " + label }
     private var zoneFillAlpha: CGFloat {

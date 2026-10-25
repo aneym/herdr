@@ -1,8 +1,6 @@
 import Combine
 import Foundation
 
-/// A sidebar row. Kind follows the mock: ORCHESTRATOR / LANES / WORKFLOWS, with
-/// workflows owned by a lane or orchestrator folded under their owner.
 struct TabRow: Identifiable, Equatable {
     enum Kind: String { case orchestrator, lane, workflow }
     let id: String          // tab_id
@@ -25,17 +23,12 @@ final class HerdrModel: ObservableObject {
     @Published private(set) var hosts: [(String, Int)] = []
     @Published private(set) var lastError: String?
     @Published private(set) var lastRefreshMs: Double = 0
-    /// Other machines, in config order. Never mixed into `snapshot`: local state stays local.
     @Published private(set) var machines: [MachineState] = Machines.configs.map { MachineState(name: $0.name) }
     private var machineClients: [HerdrClient] = []
-    /// Actions waiting for a machine's first snapshot (whenMachineLoaded).
     private var afterMachineLoad: [(String, () -> Void)] = []
 
-    /// Fetch time of the latest `session.snapshot`, for the status line.
     var pollMs: Double { lastRefreshMs }
 
-    /// Tabs whose pane changed into blocked or done since the app started, newest first.
-    /// The first snapshot is the baseline: a tab that was already blocked is not a jump.
     private(set) var attentionTrail: [String] = []
     var latestAttentionTab: String? {
         attentionTrail.first { tab in
@@ -49,9 +42,7 @@ final class HerdrModel: ObservableObject {
     let herdrBin: String
     let env: [String: String]
     let client: HerdrClient
-    /// Per-host counts for the sidebar's hosts row (P12); slots and sessions come from the provider.
     let hostsModel: HostsModel
-    /// lanes.json and areas.json (P15).
     let catalog = LaneCatalog()
 
     init(herdrBin: String, env: [String: String], hostsProvider: HostsProvider = HerdrOnlyHostsProvider()) {
@@ -61,15 +52,12 @@ final class HerdrModel: ObservableObject {
         self.client = HerdrClient(socketPath: env["HERDR_SOCKET_PATH"] ?? "")
     }
 
-    /// Live state by subscription: no timer, no `herdr api snapshot` process.
-    /// A snapshot is read over the API socket on connect and on each event batch.
     func start() {
         client.onSnapshot = { [weak self] applied in
             guard let self else { return }
             lastRefreshMs = applied.fetchMs
             apply(applied.snapshot)
             lastError = nil
-            // Evidence for scripts/check_p3.py: when each snapshot reached the model.
             log(String(format: "p3: applied epoch=%.3f tabs=%@", Date().timeIntervalSince1970,
                        applied.snapshot.tabs.map { $0.label ?? "" }.joined(separator: "|")))
         }
@@ -105,9 +93,7 @@ final class HerdrModel: ObservableObject {
 
     private var bag = Set<AnyCancellable>()
 
-    /// Bumped on every applied local snapshot, as MachineState.epoch is for another machine's.
     private var localEpoch = 0
-    /// Changes whenever a new snapshot lands for the machine that owns `id`.
     func snapshotEpoch(for id: String) -> Int {
         guard let name = Machines.split(id)?.machine else { return localEpoch }
         return machines.first { $0.name == name }?.epoch ?? 0
@@ -140,7 +126,6 @@ final class HerdrModel: ObservableObject {
         trackAttention(s)
     }
 
-    /// A pane moving into blocked or done while we are running. Kept to the last 20.
     private func trackAttention(_ s: Snapshot) {
         let agentsByPane = Dictionary(grouping: s.agents, by: { $0.pane_id })
         var next: [String: String] = [:]
@@ -182,7 +167,6 @@ final class HerdrModel: ObservableObject {
         source(for: paneId)?.panes.first { $0.pane_id == paneId }
     }
 
-    /// The snapshot that owns an id: the local one, or the machine named in it.
     func source(for id: String) -> Snapshot? {
         guard let name = Machines.split(id)?.machine else { return snapshot }
         return machines.first { $0.name == name }?.snapshot
@@ -192,14 +176,11 @@ final class HerdrModel: ObservableObject {
         source(for: tabId)?.tabs.contains { $0.tab_id == tabId } == true
     }
 
-    /// Runs `action` once the machine that owns `id` has answered (now, when it already has).
     func whenMachineLoaded(_ id: String, _ action: @escaping () -> Void) {
         if machineLoaded(for: id) { action() } else { afterMachineLoad.append((id, action)) }
     }
 
-    /// True once the machine that owns a remote id has answered at least once.
     func machineLoaded(for id: String) -> Bool {
-        // A machine no longer configured never answers; treat it as loaded so the selection falls back.
         guard let name = Machines.split(id)?.machine, let m = machines.first(where: { $0.name == name }) else { return true }
         return m.snapshot != nil
     }
@@ -241,13 +222,6 @@ final class HerdrModel: ObservableObject {
     }
 }
 
-/// Decides each tab's sidebar kind, host and owner (P4).
-///
-/// Tokens written by whoever starts the tab win: agent token `kind`
-/// (orchestrator | lane | workflow) and `host`, plus `ownership` for folding.
-/// A tab without a usable `kind` token falls back to the spike's label rules:
-/// a `wf ` label or an ownership record means workflow, the first tab of a
-/// workspace that has an agent is the orchestrator, everything else a lane.
 struct TabClassifier {
     static let defaultHost = "Studio"
 
@@ -264,7 +238,6 @@ struct TabClassifier {
             .mapValues { $0.tab_id }
     }
 
-    /// First non-empty value of a token across the tab's agents, in snapshot order.
     func token(_ key: String, of t: Snapshot.Tab) -> String? {
         for a in agentsByTab[t.tab_id] ?? [] {
             if let v = a.tokens?[key]?.trimmingCharacters(in: .whitespacesAndNewlines), !v.isEmpty { return v }
@@ -272,12 +245,10 @@ struct TabClassifier {
         return nil
     }
 
-    /// The `kind` token, if present and one of the three known kinds.
     func taggedKind(of t: Snapshot.Tab) -> TabRow.Kind? {
         token("kind", of: t).flatMap { TabRow.Kind(rawValue: $0.lowercased()) }
     }
 
-    /// Tab that owns this tab through an agent ownership record, if any and not itself.
     func ownerTab(of t: Snapshot.Tab) -> String? {
         for a in agentsByTab[t.tab_id] ?? [] {
             if let p = a.ownership?.current?.pane_id, let o = tabByPane[p], o != t.tab_id { return o }
@@ -308,12 +279,11 @@ struct TabClassifier {
 
 
 extension HerdrModel {
-    /// The shared pin order owns the numbered slots on every surface.
     func numberedTabIds(state: SidebarState) -> [String] {
         let tabs = ([snapshot].compactMap { $0 } + machines.compactMap(\.snapshot)).flatMap { $0.tabs }.map {
             SpacesInput.Tab(id: $0.tab_id, space: $0.workspace_id, label: $0.label ?? $0.tab_id, pinIndex: $0.pin_index, role: $0.role, hidden: $0.hidden ?? false, homeLocation: $0.home_location)
         }
-        return SpacesTree.numbered(tabs, rows: spacesRows(state: state), rest: allRowsInOrder.map(\.id), order: PinDrag.shared.ordered)
+        return SpacesTree.numbered(tabs, rows: spacesRows(state: state), rest: allRowsInOrder.map(\.id))
     }
 
     func isAgent(_ tab: String) -> Bool {
@@ -333,7 +303,6 @@ extension HerdrModel {
         }
     }
 
-    /// This machine's tabs with their agent cards, for Settings > Agents (SettingsAgents.rows).
     var settingsInput: SpacesInput {
         guard let s = snapshot else { return SpacesInput(spaces: [], tabs: [], focusedTab: nil) }
         return SpacesInput(spaces: Self.spaces(s), tabs: s.tabs.map {
@@ -350,9 +319,6 @@ extension HerdrModel {
         source(for: tab)?.tabs.first { $0.tab_id == tab }?.doc
     }
 
-    /// The pane header's pin: pinning puts the chat last in PINNED (the same path as the + on the
-    /// PINNED header), unpinning drops it. Alex, 2026-10-06: "a button to pin new tabs top right
-    /// next to terminal/chat pane header".
     func setPinnedAtEnd(_ tab: String, _ on: Bool) {
         let commands = HerdrCommands(socketPath: env["HERDR_SOCKET_PATH"] ?? "")
         DispatchQueue.global(qos: .userInitiated).async {
@@ -360,19 +326,13 @@ extension HerdrModel {
         }
     }
 
-    /// Pins or unpins on the server that owns the tab: HerdrCommands sends a remote id to its machine.
     func togglePin(_ tab: String) {
         let pinned = isPinned(tab)
         let commands = HerdrCommands(socketPath: env["HERDR_SOCKET_PATH"] ?? "")
         DispatchQueue.global(qos: .userInitiated).async { _ = commands.tabSetPinned(tabId: tab, pinned: !pinned) }
     }
 
-    /// A new chat pinned at the end of PINNED, in the focused chat's space (a local space when
-    /// nothing is focused), then `done` with its id once it is pinned. Alex, 2026-10-06: "i need
-    /// a button next to pinned to make a new tab that's pinned please".
     func newPinnedTab(focused: String?, done: @escaping (String) -> Void) {
-        // A selection restored on another machine waits for that machine's first snapshot; until
-        // then its space is unknown, and a local space would be the wrong one.
         if let focused, !machineLoaded(for: focused) {
             whenMachineLoaded(focused) { [weak self] in self?.newPinnedTab(focused: focused, done: done) }
             return
@@ -394,7 +354,6 @@ extension HerdrModel {
         }
     }
 
-    /// The space the tree draws `tabId` under, this machine's or another's (MachineMerge).
     func displayedSpace(of tabId: String) -> SpacesInput.Space? {
         guard let s = snapshot else { return nil }
         let local = SpacesInput(spaces: Self.spaces(s), tabs: s.tabs.map { SpacesInput.Tab(id: $0.tab_id, space: $0.workspace_id, label: $0.label ?? $0.tab_id) }, focusedTab: nil)
@@ -419,17 +378,20 @@ extension HerdrModel {
                     return SpacesInput.Agent(status: agent.agent_status ?? "unknown", parent: parentTab, explicitParent: group?.placement == "under" ? explicitTab : nil, handsOn: group?.placement == "hands_on")
                 },
                 focused: tab.tab_id == state.selectedTab, status: tab.agent_status ?? "unknown", pinIndex: tab.pin_index, work: tab.work_status, role: tab.role, sortRank: tab.sort_rank ?? 0,
-request: s.panes.filter { $0.tab_id == tab.tab_id }.compactMap { $0.tokens?["request"] }.first, hidden: tab.hidden ?? false, homeLocation: tab.home_location, runsOn: tab.runs_on, pinSection: tab.pin_section, agentName: tab.agent_card?.name, avatar: tab.agent_card?.avatar_url)
-        }, focusedTab: state.selectedTab, pinSections: s.pin_sections, automations: s.automations)
-        // areas.json owns the space groups whenever it exists (an empty list clears them), as the Rust
-        // server merges them; without it the overlay's own groups stand.
+request: s.panes.filter { $0.tab_id == tab.tab_id }.compactMap { $0.tokens?["request"] }.first, hidden: tab.hidden ?? false, homeLocation: tab.home_location, runsOn: tab.runs_on, home: tab.home, agentName: tab.agent_card?.name, avatar: tab.agent_card?.avatar_url)
+        }, focusedTab: state.selectedTab, automations: s.automations)
         var groupedOverlay = spacesOverlay
+        for tab in s.tabs {
+            if let home = tab.home {
+                var tag = groupedOverlay.tabs[tab.tab_id] ?? Overlay.Tag()
+                tag.home = home
+                groupedOverlay.tabs[tab.tab_id] = tag
+            }
+        }
         if let groups = catalog.snapshot.spaceGroups { groupedOverlay.spaceGroups = groups }
-        // Other machines' chats join their spaces; each carries its machine's badge (MachineMerge).
         let remote = MachineRows.inputs(machines, localProtocol: snapshot?.protocol)
         var rows = SpacesTree.build(MachineMerge.merge(input, machines: remote), overlay: groupedOverlay,
                                     chrome: state.spacesChrome, now: Date().timeIntervalSince1970)
-        rows = PinDrag.shared.reorder(rows)
         return MachineRows.renameHosts(MachineMerge.badge(rows, machines: remote), machines: machines.map(\.name))
     }
 }

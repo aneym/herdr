@@ -44,6 +44,10 @@ struct SpacesRowView: View {
     private var agentRow: Bool { row.id.hasPrefix("agent:") || row.id.hasPrefix("hiddenagent:") }
 
     var body: some View {
+        if row.kind == .divider {
+            Rectangle().fill(t.mute).frame(height: 1)
+                .padding(.horizontal, ShellSpace.sidebarRowInset)
+        } else {
         HStack(spacing: ShellSpace.sidebarRowGap) {
             if row.chevron != "none", row.kind != .space, row.kind != .hidden {
                 chevron.frame(maxHeight: .infinity).contentShape(Rectangle())
@@ -77,6 +81,15 @@ struct SpacesRowView: View {
             }
             if !agentRow, let machine = row.badge { badge(machine) }
             Spacer(minLength: 4)
+            if row.seats > 0 {
+                Text("\(row.seats) seats")
+                    .font(.system(size: ShellType.sectionLabel))
+                    .foregroundStyle(t.ink)
+                    .padding(.horizontal, ShellSpace.step4)
+                    .padding(.vertical, ShellSpace.step2)
+                    .background(RoundedRectangle(cornerRadius: ShellRadius.row).fill(t.cap))
+                    .fixedSize()
+            }
             if row.kind == .goal { collapseSpaces }
             if !row.trailing.isEmpty, row.kind != .goal {
                 trailingText.font(.system(size: ShellType.sectionLabel)).monospacedDigit().foregroundStyle(trailingTone)
@@ -112,10 +125,6 @@ struct SpacesRowView: View {
             if showResume {
                 Button("Resume") { resume() }.buttonStyle(.plain).foregroundStyle(t.accent).fixedSize()
             }
-            if row.id == "pinned" {
-                // A new chat pinned at the end of this section (HerdrModel.newPinnedTab).
-                Text("+").foregroundStyle(t.mute).fixedSize().onTapGesture { click("plus") }.clickTarget("pinned+")
-            }
             if row.kind == .section {
                 Text(focusMark ?? "").font(.system(size: ShellType.glyph)).foregroundStyle(t.mute)
                     .frame(width: 10).onTapGesture { if focusMark != nil { click("focus") } }
@@ -145,6 +154,8 @@ struct SpacesRowView: View {
         .frame(height: ShellSpace.rowHeight)
         .padding(.leading, indent).padding(.horizontal, ShellSpace.sidebarRowInset)
         .background(RoundedRectangle(cornerRadius: ShellRadius.row).fill(selected && row.kind == .tab ? t.sel : .clear))
+        .accessibilityLabel([row.title, row.hover].compactMap { $0 }.joined(separator: ", "))
+        }
     }
 
     private func homeGlyph(_ home: String) -> String? {
@@ -221,7 +232,11 @@ struct SpacesRowView: View {
     }
 
     /// Status color, as Ghostty: working green, blocked red, done peach, idle and unknown mute.
-    private var tone: Color { Color(hex: t.stateTone(row.tone)) }
+    private var tone: Color {
+        if row.homeState == "needs_you" { return t.attentionAct }
+        if row.homeState == "finished" { return t.ok }
+        return Color(hex: t.stateTone(row.tone))
+    }
 
     /// Leading inset: sections sit under the space name, rows under the section label.
     private var indent: CGFloat {
