@@ -48,6 +48,7 @@ import subprocess
 import sys
 import time
 import tempfile
+from publish_fetch import shared_fetch
 
 HOME = os.path.expanduser("~")
 REPO = os.environ.get("HERDR_REPO", "/Volumes/StudioExt/repos/herdr")
@@ -644,10 +645,7 @@ def send_data(snapshot, digests):
 
 
 def fetch():
-    """Bring origin/<release branch> up to date. The hook skips this ref update; the caller
-    runs `auto` itself."""
-    subprocess.run(["git", "-C", REPO, "fetch", "-q", "origin", branch()],
-                   capture_output=True, timeout=60, env={**os.environ, "HERDR_SHELL_PUBLISHING": "1"})
+    shared_fetch(REPO, branch(), LOGDIR)
 
 
 QUIET = float(os.environ.get("HERDR_SHELL_QUIET", "20"))
@@ -683,6 +681,12 @@ def auto(refetch=False):
                 fetch()
             except (OSError, subprocess.TimeoutExpired):
                 pass
+        checked_path = os.path.join(LOGDIR, "checked-target.json")
+        try:
+            with open(checked_path) as source:
+                checked = json.load(source)
+        except (OSError, ValueError):
+            checked = None
         tried = set()
         while True:
             ref = f"refs/remotes/origin/{branch()}"
@@ -692,11 +696,15 @@ def auto(refetch=False):
                 log(f"auto: no {ref}")
                 return
             rel = release()
-            if (rel and same(rel.get("commit", ""), sha)) or sha in tried:
+            target = {"repo": os.path.realpath(REPO), "ref": ref, "sha": sha, "release": rel and rel.get("commit")}
+            if checked == target or (rel and same(rel.get("commit", ""), sha)) or sha in tried:
                 return
             tried.add(sha)
             if rel and not shell_changed(rel.get("commit", ""), sha):
-                # Re-read the branch: a push that lost the lock to this run is still ours.
+                with open(checked_path + ".tmp", "w") as destination:
+                    json.dump(target, destination)
+                os.replace(checked_path + ".tmp", checked_path)
+                checked = target
                 continue
             quiet = settled(ref)
             if quiet != sha:
