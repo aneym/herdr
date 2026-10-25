@@ -22,7 +22,7 @@ def shared_fetch(repo, branch, logdir, max_age=60):
             fcntl.flock(lock, fcntl.LOCK_EX | (fcntl.LOCK_NB if max_age else 0))
         except BlockingIOError:
             return False
-        tip = subprocess.run(['git', '-C', repo, 'rev-parse', '--verify', ref], capture_output=True, text=True).stdout.strip()
+        tip = subprocess.run(['git', '-C', repo, 'rev-parse', '--verify', ref], capture_output=True, text=True, check=False).stdout.strip()
         try:
             state = json.loads(state_path.read_text())
         except (OSError, ValueError):
@@ -35,12 +35,12 @@ def shared_fetch(repo, branch, logdir, max_age=60):
         try:
             result = subprocess.run(
                 ['git', '-C', repo, 'fetch', '-q', '--no-tags', '--recurse-submodules=no', 'origin', f'+refs/heads/{branch}:{ref}'],
-                capture_output=True, timeout=60, env={**os.environ, 'HERDR_SHELL_PUBLISHING': '1'},
+                capture_output=True, timeout=60, check=False, env={**os.environ, 'HERDR_SHELL_PUBLISHING': '1'},
             )
             ok = result.returncode == 0
         except (OSError, subprocess.TimeoutExpired):
             pass
-        tip = subprocess.run(['git', '-C', repo, 'rev-parse', '--verify', ref], capture_output=True, text=True).stdout.strip()
+        tip = subprocess.run(['git', '-C', repo, 'rev-parse', '--verify', ref], capture_output=True, text=True, check=False).stdout.strip()
         state = {'sha': tip, 'ok': ok, 'finished_at': time.time(), 'duration_s': round(time.monotonic() - started, 3)}
         temporary = state_path.with_suffix(f'.{os.getpid()}.tmp')
         temporary.write_text(json.dumps(state))
