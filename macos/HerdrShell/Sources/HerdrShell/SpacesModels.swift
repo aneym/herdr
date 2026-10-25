@@ -10,7 +10,7 @@ struct SpacesInput: Codable {
         var agentName: String? = nil; var avatar: String? = nil; var hidden = false; var homeLocation: String? = nil
         var runsOn: String? = nil
         var home: HomeTag? = nil
-        
+
         init(id: String, space: String, label: String, agents: [Agent] = [], focused: Bool = false, status: String = "unknown", pinIndex: Int? = nil, work: String? = nil, role: String? = nil, sortRank: UInt32 = 0, request: String? = nil, hidden: Bool = false, homeLocation: String? = nil, runsOn: String? = nil, home: HomeTag? = nil, agentName: String? = nil, avatar: String? = nil) { self.agentName = agentName; self.avatar = avatar; self.hidden = hidden; self.homeLocation = homeLocation; self.runsOn = runsOn; self.home = home; self.id = id; self.space = space; self.label = label; self.agents = agents; self.focused = focused; self.status = status; self.pinIndex = pinIndex; self.work = work; self.role = role; self.sortRank = sortRank; self.request = request }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: Field.self)
@@ -191,4 +191,3 @@ struct SpacesRow: Identifiable, Equatable {
         return output.joined(separator: "|")
     }
 }
-
