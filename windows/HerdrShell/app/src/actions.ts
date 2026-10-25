@@ -79,7 +79,7 @@ export async function runAction(action: Action, ctx: ActionContext): Promise<voi
       const id = ctx.snapshot.tabs?.find(t => t.tab_id === active)?.tab_id ?? ctx.snapshot.tabs?.filter(t => t.workspace_id === space?.id).sort((a, b) => a.number - b.number)[0]?.tab_id;
       if (space && id) ctx.select(id);
     } else if (action === "agent_list_up" || action === "agent_list_down") {
-      const id = step([...new Set(ctx.rows.filter(r => r.kind === "agent" && !r.hidden).map(r => r.id))], ctx.selected, action === "agent_list_down" ? 1 : -1);
+      const id = step([...new Set(ctx.rows.filter(r => r.kind === "home" && r.homeTag?.class === "owner").map(r => r.id))], ctx.selected, action === "agent_list_down" ? 1 : -1);
       if (id) ctx.select(id);
     } else if (action === "attention_jump" && latestAttentionTab(ctx.attentionTrail ?? [], ctx.snapshot)) ctx.select(latestAttentionTab(ctx.attentionTrail ?? [], ctx.snapshot)!);
     else if ((action === "next_pane" || action === "prev_pane") && ctx.navigation?.mode === "areas") {
@@ -88,7 +88,7 @@ export async function runAction(action: Action, ctx: ActionContext): Promise<voi
       const id = ctx.rows.find(r => r.kind !== "space" && r.hotkey === Number(action.slice(11)))?.id;
       if (id) ctx.select(id);
     } else if (action === "next_tab" || action === "prev_tab") {
-      const visible = tabOrder(ctx.rows.filter(r => !(r.kind === "agent" && r.hidden)));
+      const visible = tabOrder(ctx.rows);
       const amount = action === "next_tab" ? 1 : -1;
       const index = order.indexOf(ctx.selected ?? "");
       let id = step(visible, ctx.selected, amount);
@@ -101,7 +101,7 @@ export async function runAction(action: Action, ctx: ActionContext): Promise<voi
       }
       if (id) ctx.select(id);
     } else if (action === "next_attention" || action === "attention_jump") {
-      const attention = ["blocked", "done"].flatMap(status => order.filter(id => ctx.rows.some(r => r.kind !== "space" && !(r.kind === "agent" && r.hidden) && r.id === id && r.status === status)));
+      const attention = ["needs_you", "blocked", "done", "finished"].flatMap(status => order.filter(id => ctx.rows.some(r => r.kind !== "space" && !r.represented && r.id === id && r.status === status)));
       const id = step(attention, ctx.selected, 1); if (id) ctx.select(id);
     } else if (action === "toggle_sidebar") ctx.toggleSidebar();
     else if (action === "switcher" || action === "search" || action === "goto") ctx.switcher(action);

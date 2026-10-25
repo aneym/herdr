@@ -3,7 +3,7 @@ import { bridge, fromBase64 } from "./bridge";
 import type { SidebarRow } from "./model";
 
 /** The factory overlay's tab tag, normalised as the Mac's Overlay.Tag decoder (SpacesTree.swift). */
-export interface OverlayTag { kind: string; section?: string; mode: string; parent?: string; goal?: string; goalArea?: string; done: boolean }
+export interface OverlayTag { [key: string]: unknown; kind: string; mode: string; parent?: string; goal?: string; goalArea?: string; done: boolean }
 export interface OverlayHost { name: string; summary?: string; attention: string; url?: string; detail?: string }
 export interface SpaceGroup { name: string; spaces: string[] }
 export interface SpacesOverlay { tabs: Record<string, OverlayTag>; hosts: OverlayHost[]; spaceGroups: SpaceGroup[] }
@@ -23,11 +23,7 @@ export function parseOverlay(text: string | null | undefined): SpacesOverlay {
     const t = obj(value);
     let kind = str(t.kind) ?? "unknown"; if (!["orchestrator", "lane", "workflow", "advisor"].includes(kind)) kind = "unknown";
     let mode = str(t.mode) ?? "active"; if (!["parked", "auto"].includes(mode)) mode = "active";
-    let section = str(t.section);
-    if (section === "inflight" || section === "idle") section = "implementing";
-    if (section === "waiting" || section === "ready" || section === "ready_for_review") section = "reviewing";
-    if (!["orchestrator", "scoping", "implementing", "reviewing", "monitoring", "closed"].includes(section ?? "")) section = undefined;
-    tabs[id] = { kind, mode, section, parent: str(t.parent), goal: str(t.goal), goalArea: str(t.goal_area), done: t.done === true };
+    tabs[id] = { kind, mode, parent: str(t.parent), goal: str(t.goal), goalArea: str(t.goal_area), done: t.done === true };
   }
   const hosts = list(root.hosts).map(obj).map(h => ({ name: str(h.name) ?? "", summary: str(h.summary), attention: str(h.attention) ?? "none", url: str(h.url), detail: str(h.detail) }));
   return { tabs, hosts, spaceGroups: parseSpaceGroups(root.space_groups) };
@@ -58,17 +54,12 @@ export function groupSpaces(spaces: SidebarRow[], groups: SpaceGroup[]): { group
   return rest.length ? [...out, { group: null, spaces: rest }] : out;
 }
 export interface SpaceSection { key: string; title: string; kind: "section" | "group"; foldable: boolean; trailing: string; members: SidebarRow[] }
-/** One space's sections, as the Mac's SpacesTree.appendSpace over SpaceScope: ORCHESTRATOR, then
- *  the four stage sections when any tab carries one (else LANES), then the folded services, parked,
- *  closed and background groups. The goal filter applies only to a sectioned top-level space.
- *  `children` maps a header to the workflows nested under it (folded by default on the Mac). */
 export function spaceSections(spaceId: string, tabs: SidebarRow[], overlay: SpacesOverlay, filter: string | null, topLevel: boolean): { sections: SpaceSection[]; children: Record<string, SidebarRow[]> } {
   const none: OverlayTag = { kind: "unknown", mode: "active", done: false };
   const tag = (row: SidebarRow) => overlay.tabs[row.id] ?? none;
   const leader = tabs.find(t => tag(t).kind === "orchestrator" && !tag(t).done)?.id;
-  const sectioned = tabs.some(t => overlay.tabs[t.id]?.section != null);
   const shown = tabs.filter(t => {
-    if (!sectioned || !topLevel || !filter) return true;
+    if (!topLevel || !filter) return true;
     const tg = overlay.tabs[t.id]; if (!tg) return false;
     const [goal, area] = filter.split(/:(.*)/s);
     return tg.kind === "orchestrator" || tg.mode === "auto" || (tg.goal === goal && (!area || tg.goalArea === area));
@@ -84,18 +75,12 @@ export function spaceSections(spaceId: string, tabs: SidebarRow[], overlay: Spac
   for (const w of workflows) { const p = parent(w); if (p && p !== w.id) (children[p] ??= []).push(w); }
   const topWorkflows = workflows.filter(w => !parent(w) || parent(w) === w.id);
   const sections: SpaceSection[] = [];
-  const section = (title: string, members: SidebarRow[], count = false) => {
-    if (!members.length) return;
-    sections.push({ key: `section:${spaceId}:${title}`, title, kind: "section", foldable: sectioned, trailing: count ? String(members.length) : "", members });
+  const section = (title: string, members: SidebarRow[]) => {
+    if (members.length) sections.push({ key: `section:${spaceId}:${title}`, title, kind: "section", foldable: false, trailing: "", members });
   };
-  const active = (t: SidebarRow) => tag(t).mode === "active";
-  section("ORCHESTRATOR", [...orch, ...lanes.filter(t => tag(t).section === "orchestrator" && active(t))]);
-  if (sectioned) {
-    for (const [value, title] of [["reviewing", "READY FOR REVIEW"], ["scoping", "SCOPING"], ["implementing", "IMPLEMENTING"], ["monitoring", "MONITORING"]] as const) {
-      section(title, [...lanes.filter(t => active(t) && (tag(t).section ?? "implementing") === value), ...(value === "implementing" ? ordinary : [])], value === "reviewing");
-    }
-  } else section("LANES", [...lanes.filter(active), ...topWorkflows, ...ordinary]);
-  for (const [name, members] of [["services", [...lanes.filter(t => tag(t).mode === "auto"), ...(sectioned ? topWorkflows : [])]], ["parked", lanes.filter(t => tag(t).mode === "parked")], ["closed", sectioned ? lanes.filter(t => active(t) && tag(t).section === "closed") : []], ["background", background]] as const) {
+  section("ORCHESTRATOR", orch);
+  section("LANES", [...lanes.filter(t => tag(t).mode === "active"), ...topWorkflows, ...ordinary]);
+  for (const [name, members] of [["services", lanes.filter(t => tag(t).mode === "auto")], ["parked", lanes.filter(t => tag(t).mode === "parked")], ["background", background]] as const) {
     if (members.length) sections.push({ key: `group:${spaceId}:${name}`, title: `${name} ${members.length}`, kind: "group", foldable: true, trailing: "", members: [...members] });
   }
   return { sections, children };

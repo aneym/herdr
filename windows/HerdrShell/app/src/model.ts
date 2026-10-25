@@ -1,7 +1,5 @@
-import { pendingOrder } from "./pinDrag";
-import type { PendingOrders } from "./pinDrag";
-import { faceFor } from "./faces";
 import type { Face } from "./faces";
+import { compareHomeTags, homeSection, homeTooltip, representedTabIds } from "./home";
 export interface Workspace { workspace_id: string; number: number; sort_rank?: number; parked?: boolean; label?: string; focused?: boolean; active_tab_id?: string; work_status?: string; agent_status?: string; tokens?: { pinned?: string; hidden?: string } }
 export interface Tab { tab_id: string; workspace_id: string; number: number; label?: string; custom_label?: boolean; focused?: boolean; pane_count?: number; work_status?: string; agent_status?: string; pin_index?: number; role?: string; sort_rank?: number; hidden?: boolean; home_location?: "cloud" | "local" | "unsynced"; runs_on?: string; doc?: TabDoc; pin_section?: string; agent_card?: AgentCard }
 export interface AgentCard { name: string; avatar_url?: string }
@@ -16,53 +14,40 @@ export function paneName(pane: Pane, agent?: { agent?: string }): string {
 export interface Rect { x: number; y: number; width: number; height: number }
 export interface Layout { tab_id: string; area: Rect; panes: { pane_id: string; rect: Rect }[]; splits?: { id: string; direction: string; ratio: number; rect: Rect }[]; zoomed?: boolean; focused_pane_id?: string }
 export interface TabPulse { line: string; drifting?: boolean }
-export interface Snapshot { pin_sections?: string[]; automations?: AutomationSummary[]; overlay?: { tabs?: Record<string, { pulse?: TabPulse }> }; workspaces?: Workspace[]; tabs?: Tab[]; panes?: Pane[]; agents?: { terminal_id: string; pane_id: string; tab_id: string; workspace_id: string; agent: string; agent_status: string; work_status?: string; group?: { placement?: string; parent?: { pane_id?: string }; orphaned?: boolean; collapsed?: boolean } }[]; layouts?: Layout[] }
-export interface SidebarRow { kind: "agent" | "pinned" | "space" | "tab"; id: string; label: string; status: string; hotkey: number | null; section: string; depth?: number; spaceLabel?: string; spaceId?: string; hidden?: boolean; parked?: boolean; pinned?: boolean; face?: Face; request?: string; home?: Tab["home_location"]; runsOn?: string; machine?: string; machineHealth?: string | null; doc?: TabDoc; pinGroup?: string }
+export type HomeState = "needs_you" | "working" | "finished";
+export interface HomeTag { entity: string; class: "owner" | "lane" | "utility"; state: HomeState; seats: number; stale: boolean; progress_at?: number | null; finished_at: number | null; sub: string; order: number; folded: boolean }
+export interface OverlayTabTag { pulse?: TabPulse; home?: HomeTag; parent?: string; badge?: string }
+export interface Snapshot { pin_sections?: string[]; automations?: AutomationSummary[]; overlay?: { tabs?: Record<string, OverlayTabTag> }; workspaces?: Workspace[]; tabs?: Tab[]; panes?: Pane[]; agents?: { terminal_id: string; pane_id: string; tab_id: string; workspace_id: string; agent: string; agent_status: string; work_status?: string; group?: { placement?: string; parent?: { pane_id?: string }; orphaned?: boolean; collapsed?: boolean } }[]; layouts?: Layout[] }
+export interface SidebarRow { kind: "agent" | "pinned" | "home" | "space" | "tab"; id: string; label: string; status: string; hotkey: number | null; section: string; depth?: number; spaceLabel?: string; spaceId?: string; hidden?: boolean; parked?: boolean; pinned?: boolean; face?: Face; request?: string; home?: Tab["home_location"]; runsOn?: string; machine?: string; machineHealth?: string | null; doc?: TabDoc; homeTag?: HomeTag; represented?: boolean; hostBadge?: string; homeDetail?: string }
 export const tabStatus = (snapshot: Snapshot, tab: Tab): string => tab.work_status ?? snapshot.agents?.find(agent => agent.tab_id === tab.tab_id)?.agent_status ?? tab.agent_status ?? "unknown";
 export const statusRank = (status: string) => ({ blocked: 3, working: 2, done: 1 }[status] ?? 0);
-export function buildSidebar(snapshot: Snapshot, pending: PendingOrders = {}, now = Date.now()): SidebarRow[] {
+export function buildSidebar(snapshot: Snapshot, now = Date.now()): SidebarRow[] {
   const tabs = snapshot.tabs ?? [];
-  // The Mac ranks spaces stably; the client applies its presentation pin partition.
+  const tags = snapshot.overlay?.tabs ?? {};
+  const represented = representedTabIds(snapshot);
+  const homeIds = new Set(tabs.filter(tab => tags[tab.tab_id]?.home).map(tab => tab.tab_id));
   const byRank = (a: Workspace | Tab, b: Workspace | Tab) => (a.sort_rank ?? 0) - (b.sort_rank ?? 0) || a.number - b.number;
   const spaces = [...snapshot.workspaces ?? []].sort((a, b) => (a.sort_rank ?? 0) - (b.sort_rank ?? 0));
   const rows: SidebarRow[] = [];
-  const row = (tab: Tab, kind: "agent" | "pinned" | "tab", section: string): SidebarRow => ({ kind, section, id: tab.tab_id, label: tab.label || snapshot.panes?.find(p => p.tab_id === tab.tab_id)?.terminal_title_stripped || `tab ${tab.number}`, status: tabStatus(snapshot, tab), hotkey: null, pinned: tab.pin_index != null, spaceId: tab.workspace_id, spaceLabel: spaces.find(s => s.workspace_id === tab.workspace_id)?.label, ...(tab.doc && /^https?:\/\//i.test(tab.doc.url) ? { doc: tab.doc } : {}) });
-  // As the Mac's SpacesTree.pinTabs: agents and plain pins are separate blocks, each in pin order.
-  const byPin = (a: Tab, b: Tab) => (a.pin_index ?? 0) - (b.pin_index ?? 0);
-  const pinned = (list: Tab[], section: "agent" | "pinned") => {
-    const ids = pendingOrder(list.sort(byPin).map(t => t.tab_id), pending[section], now);
-    return ids.map(id => list.find(t => t.tab_id === id)!);
-  };
-  // An agent row carries its face and open request; the request folds into the face's dot.
-  const agents = tabs.filter(t => t.role === "agent");
-  const agentByPane = new Map((snapshot.agents ?? []).map(a => [a.pane_id, a]));
-  const parentTab = (tab: Tab) => {
-    const agent = (snapshot.agents ?? []).find(a => a.tab_id === tab.tab_id);
-    const group = agent?.group;
-    const pane = group?.placement === "under" ? group.parent?.pane_id : undefined;
-    return pane ? agentByPane.get(pane)?.tab_id : undefined;
-  };
-  // Pending drags name only visible rows; hidden pins retain their server slot.
-  pinned(agents.filter(t => !t.hidden && (!parentTab(t) || (snapshot.agents ?? []).find(a => a.tab_id === t.tab_id)?.group?.placement === "hands_on")), "agent").concat(agents.filter(t => t.hidden).sort(byPin)).forEach(t => {
-    const item = row(t, "agent", "AGENTS"), card = t.agent_card;
-    const request = snapshot.panes?.filter(p => p.tab_id === t.tab_id).map(p => p.tokens?.request).find(r => r != null);
-    rows.push({ ...item, hidden: !!t.hidden, home: t.home_location, ...(t.runs_on ? { runsOn: t.runs_on } : {}), face: faceFor(card?.name ?? item.label, card?.avatar_url), ...(request != null ? { request } : {}) });
-    agents.filter(child => !child.hidden && parentTab(child) === t.tab_id).sort(byPin).forEach(child => {
-      const nested = row(child, "agent", "AGENTS");
-      rows.push({ ...nested, depth: 1, home: child.home_location, face: faceFor(child.agent_card?.name ?? nested.label, child.agent_card?.avatar_url) });
+  const row = (tab: Tab, kind: "home" | "tab", section: string): SidebarRow => ({ kind, section, id: tab.tab_id, label: tab.label || snapshot.panes?.find(p => p.tab_id === tab.tab_id)?.terminal_title_stripped || `tab ${tab.number}`, status: tabStatus(snapshot, tab), hotkey: null, pinned: tab.pin_index != null, spaceId: tab.workspace_id, spaceLabel: spaces.find(s => s.workspace_id === tab.workspace_id)?.label, ...(tab.doc && /^https?:\/\//i.test(tab.doc.url) ? { doc: tab.doc } : {}) });
+  for (const section of ["NEEDS YOU", "WORKING", "FINISHED", "UTILITIES"]) {
+    tabs.filter(tab => {
+      const home = tags[tab.tab_id]?.home;
+      return home && homeSection(home) === section;
+    }).sort((a, b) => compareHomeTags(tags[a.tab_id]?.home, tags[b.tab_id]?.home)).forEach(tab => {
+      const home = tags[tab.tab_id]!.home!;
+      rows.push({ ...row(tab, "home", section), status: home.state, homeTag: home, hostBadge: tags[tab.tab_id]?.badge, homeDetail: homeTooltip(home, now) });
     });
-  });
-  const groups = snapshot.pin_sections ?? [];
-  pinned(tabs.filter(t => t.role !== "agent" && t.pin_index != null), "pinned").forEach(t => rows.push({ ...row(t, "pinned", "PINNED"), ...(t.pin_section && groups.includes(t.pin_section) ? { pinGroup: t.pin_section } : {}) }));
+  }
   for (const space of spaces.filter(s => s.tokens?.hidden !== "true").concat(spaces.filter(s => s.tokens?.hidden === "true"))) {
     const children = tabs.filter(t => t.workspace_id === space.workspace_id);
     const status = children.map(t => tabStatus(snapshot, t)).sort((a, b) => statusRank(b) - statusRank(a))[0] ?? "idle";
     rows.push({ kind: "space", id: space.workspace_id, label: space.label || `space ${space.number}`, status, hotkey: null, section: "spaces", hidden: space.tokens?.hidden === "true", ...(space.parked ? { parked: true } : {}) });
-    children.filter(t => t.role !== "agent").sort(byRank).forEach(t => rows.push({ ...row(t, "tab", space.workspace_id), hidden: space.tokens?.hidden === "true" }));
+    children.filter(t => !homeIds.has(t.tab_id)).sort(byRank).forEach(t => rows.push({ ...row(t, "tab", space.workspace_id), represented: represented.has(t.tab_id), hidden: space.tokens?.hidden === "true" }));
   }
   const numbered = new Map<string, number>();
   for (const item of rows) {
-    if (item.kind === "space" || item.kind === "agent" && item.hidden) continue;
+    if (item.kind === "space" || item.represented) continue;
     if (!numbered.has(item.id) && numbered.size < 9) numbered.set(item.id, numbered.size + 1);
     item.hotkey = numbered.get(item.id) ?? null;
   }
@@ -87,8 +72,8 @@ export function foldAllSpaces(rows: SidebarRow[], expanded: Record<string, boole
 /** Reveal on select, as the Mac's SpacesChrome.reveal: the fold key to open so the selected tab's
  *  space shows its tabs, or null when it already does. Hidden spaces stay in the Hidden group. */
 export function revealFold(rows: SidebarRow[], selected: string | null, expanded: Record<string, boolean>): string | null {
-  if (rows.some(r => r.kind === "pinned" && r.id === selected)) return null;
-  const tab = rows.find(r => r.kind === "tab" && r.id === selected);
+  if (rows.some(r => r.kind === "home" && r.id === selected)) return null;
+  const tab = rows.find(r => r.kind === "tab" && r.id === selected && !r.represented);
   const space = tab && rows.find(r => r.kind === "space" && r.id === tab.spaceId);
   return space && !spaceOpen(space, rows, selected, expanded) ? foldKey(space) : null;
 }
@@ -114,21 +99,19 @@ export function scaleRect(rect: Rect, area: Rect, width: number, height: number)
   return { x: (rect.x - area.x) / Math.max(1, area.width) * width, y: (rect.y - area.y) / Math.max(1, area.height) * height, width: rect.width / Math.max(1, area.width) * width, height: rect.height / Math.max(1, area.height) * height };
 }
 
-// A removed selection follows its previous drawn pin block; unpinned selection
-// retains the old index-based fallback, including the server's initial focus.
 export function selectionAfterClose(previous: SidebarRow[], rows: SidebarRow[], selected: string | null, initial?: string): string | null {
-  const visible = (items: SidebarRow[]) => tabOrder(items.filter(r => !(r.kind === "agent" && r.hidden)));
+  const visible = (items: SidebarRow[]) => tabOrder(items.filter(r => !r.represented && !(r.kind === "agent" && r.hidden)));
   const order = visible(rows);
   if (selected) {
-    const pin = previous.find(r => r.id === selected && (r.kind === "agent" || r.kind === "pinned"));
-    if (pin) {
-      const own = previous.filter(r => r.kind === pin.kind).map(r => r.id);
-      const other = previous.filter(r => r.kind === (pin.kind === "agent" ? "pinned" : "agent")).map(r => r.id);
+    const home = previous.find(r => r.id === selected && r.kind === "home");
+    if (home) {
+      const own = previous.filter(r => r.kind === "home" && r.section === home.section).map(r => r.id);
+      const other = previous.filter(r => r.kind === "home" && r.section !== home.section).map(r => r.id);
       const index = own.indexOf(selected);
       const next = [...own.slice(index + 1), ...own.slice(0, index).reverse(), ...other].find(id => order.includes(id));
       if (next) return next;
     }
   }
   const index = selected ? visible(previous).indexOf(selected) : -1;
-  return index >= 0 ? order[Math.min(index, order.length - 1)] ?? null : initial != null && !rows.some(r => r.id === initial && r.kind === "agent" && r.hidden) ? initial : order[0] ?? null;
+  return index >= 0 ? order[Math.min(index, order.length - 1)] ?? null : initial != null && rows.some(r => r.id === initial) ? initial : order[0] ?? null;
 }
