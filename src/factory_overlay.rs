@@ -122,8 +122,10 @@ pub struct HomeTag {
     pub state: String,
     pub seats: u32,
     pub stale: bool,
-    pub progress_at: Option<i64>,
-    pub finished_at: Option<i64>,
+    #[schemars(with = "Option<f64>")]
+    pub progress_at: Option<serde_json::Number>,
+    #[schemars(with = "Option<f64>")]
+    pub finished_at: Option<serde_json::Number>,
     pub sub: String,
     pub order: i64,
     pub folded: bool,

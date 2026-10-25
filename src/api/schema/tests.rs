@@ -923,7 +923,7 @@ fn session_snapshot_request_and_response_round_trip() {
                 layouts: Vec::new(),
                 agents: Vec::new(),
                 pending_agent_restores: 0,
-                pin_sections: Vec::new(),
+                overlay: None,
                 automations: Vec::new(),
             }),
         },
