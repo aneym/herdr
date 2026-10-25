@@ -36,7 +36,6 @@ struct SpacesRowView: View {
 
     private var isFooter: Bool { row.kind == .footerUsage || row.kind == .footerHost }
     private var treeRow: Bool { row.kind == .tab || row.kind == .automation || row.kind == .section }
-    private var agentRow: Bool { row.id.hasPrefix("agent:") }
 
     var body: some View {
         if row.kind == .divider {
@@ -74,7 +73,7 @@ struct SpacesRowView: View {
                 Circle().fill(t.accent).frame(width: ShellFace.dot, height: ShellFace.dot)
                     .help("request \(request)")
             }
-            if !agentRow, let machine = row.badge { badge(machine) }
+            if let machine = row.badge { badge(machine) }
             Spacer(minLength: 4)
             if row.seats > 0 {
                 Text("\(row.seats) seats")
@@ -93,18 +92,11 @@ struct SpacesRowView: View {
                     .layoutPriority(1)
                     .onTapGesture { click(row.link == nil ? "body" : "link") }
             }
-            if agentRow, let place = row.place {
-                Text(place).font(.system(size: ShellType.sectionLabel)).foregroundStyle(t.mute)
-                    .lineLimit(1).fixedSize()
-                    .help("Runs on " + place).accessibilityLabel("Runs on " + place)
-            }
             if let home = row.home, let glyph = homeGlyph(home) {
                 Text(glyph).font(.system(size: ShellType.rowTrailing))
                     .foregroundStyle(home == "unsynced" ? t.warn : t.mute)
                     .help(homeLabel(home)).accessibilityLabel(homeLabel(home))
             }
-            // Agent machine badges follow the home glyph (spec line 98).
-            if agentRow, let machine = row.badge { badge(machine) }
             if row.kind != .goal, !isFooter, row.kind != .title {
                 Text(row.alert == "none" ? "" : "!").fontWeight(.bold)
                     .foregroundStyle(row.alert == "act" ? t.bad : t.warn)
