@@ -199,6 +199,7 @@ pub struct RunTag {
 pub struct HostRow {
     pub name: String,
     pub summary: Option<String>,
+    pub detail: Option<String>,
     pub attention: Attention,
     pub url: Option<String>,
 }
