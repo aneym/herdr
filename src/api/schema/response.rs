@@ -44,10 +44,6 @@ pub struct ErrorBody {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ResponseResult {
-    PinSections {
-        sections: Vec<super::tabs::PinSectionInfo>,
-        unsectioned: Vec<String>,
-    },
     TabDoc {
         tab_id: String,
         workspace_id: String,

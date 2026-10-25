@@ -2315,7 +2315,6 @@ fn focusing_a_tab_or_workspace_reveals_its_agent_group_unless_pinned() {
                     priority: 0,
                     hidden: false,
                     role,
-                    section: None,
                 });
         }
         server

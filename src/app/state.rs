@@ -36,8 +36,6 @@ pub struct PinnedTab {
     pub role: Option<crate::api::schema::TabRole>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub hidden: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub section: Option<String>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PluginPaneRecord {
@@ -942,7 +940,6 @@ pub struct AppState {
     /// session fact (not per-client chrome): the same order drives Cmd+1..9
     /// on every attached client. Keyed by public tab id.
     pub pinned_tabs: Vec<PinnedTab>,
-    pub pin_sections: Vec<String>,
     /// Collapsed spaces move into the tree's `hidden` section instead of
     /// keeping their slot. Persisted with the other tree prefs.
     pub tree_show_hidden_spaces: bool,
@@ -1054,7 +1051,6 @@ impl AppState {
             tree_pinned_spaces: self.tree_pinned_spaces.clone(),
             docs: self.docs.clone(),
             pinned_tabs: self.pinned_tabs.clone(),
-            pin_sections: self.pin_sections.clone(),
             tree_show_hidden_spaces: self.tree_show_hidden_spaces,
             hidden_spaces_expanded: self.hidden_spaces_expanded,
             hidden_agents_expanded: self.hidden_agents_expanded,
@@ -1082,11 +1078,6 @@ impl AppState {
             .pinned_tabs
             .iter()
             .any(|pin| pin.tab_id == tab_id && pin.role.is_some() && pin.hidden);
-        let section = self
-            .pinned_tabs
-            .iter()
-            .find(|pin| pin.tab_id == tab_id)
-            .and_then(|pin| pin.section.clone());
         self.unpin_tab(&tab_id);
         let agents = self
             .pinned_tabs
@@ -1108,13 +1099,11 @@ impl AppState {
                 priority,
                 role,
                 hidden,
-                section,
             },
         );
         if role.is_none() && !self.sidebar_priority.is_empty() {
             self.priority_renamed_pins(&[self.pinned_tabs[position].tab_id.clone()]);
         }
-        self.normalize_pin_sections();
     }
 
     /// The inclusive global index range a pin may occupy.
@@ -1128,11 +1117,7 @@ impl AppState {
         if self.pinned_tabs[index].role.is_some() {
             return Some(0..=agents - 1);
         }
-        let rank = self.pin_section_rank(self.pinned_tabs[index].section.as_deref());
-        let block: Vec<usize> = (agents..self.pinned_tabs.len())
-            .filter(|&i| self.pin_section_rank(self.pinned_tabs[i].section.as_deref()) == rank)
-            .collect();
-        Some(block[0]..=block[block.len() - 1])
+        Some(agents..=self.pinned_tabs.len() - 1)
     }
 
     /// Move inside the role block and clamp priority against only its neighbours.
@@ -1183,7 +1168,6 @@ impl AppState {
                 priority: 0,
                 role: None,
                 hidden: false,
-                section: None,
             });
         pin.role = role;
         if role.is_none() {
@@ -1198,7 +1182,6 @@ impl AppState {
         if role.is_none() {
             self.priority_renamed_pins(&[tab_id.to_owned()]);
         }
-        self.normalize_pin_sections();
         true
     }
 
@@ -1220,7 +1203,6 @@ impl AppState {
     pub fn normalize_pin_roles(&mut self) {
         self.pinned_tabs.sort_by_key(|pin| pin.role.is_none());
         self.sort_priority_pins();
-        self.normalize_pin_sections();
     }
 
     pub fn unpin_tab(&mut self, tab_id: &str) -> bool {
@@ -1609,7 +1591,6 @@ impl AppState {
             tree_pinned_spaces: std::collections::HashSet::new(),
             docs: Default::default(),
             pinned_tabs: Vec::new(),
-            pin_sections: Vec::new(),
             tree_show_hidden_spaces: false,
             hidden_spaces_expanded: false,
             hidden_agents_expanded: false,

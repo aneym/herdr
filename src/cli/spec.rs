@@ -40,7 +40,6 @@ pub(super) fn command() -> Command {
         .subcommand(workspace_command())
         .subcommand(worktree_command())
         .subcommand(tab_command())
-        .subcommand(pin_section_command())
         .subcommand(notification_command())
         .subcommand(agent_command())
         .subcommand(pane_command())
@@ -319,8 +318,7 @@ fn tab_command() -> Command {
             Command::new("pin")
                 .about("Pin a tab to the sidebar's pinned section")
                 .arg(required("tab_id", "TAB_ID"))
-                .arg(option("priority", "N"))
-                .arg(option("section", "NAME")),
+                .arg(option("priority", "N")),
         )
         .subcommand(
             Command::new("set-role")
@@ -348,47 +346,8 @@ fn tab_command() -> Command {
                 .arg(required("tab_id", "TAB_ID"))
                 .arg(required("pin_index", "INDEX")),
         )
-        .subcommand(
-            Command::new("pin-section")
-                .about("Put a pinned tab in a named Pinned section, or none")
-                .arg(required("tab_id", "TAB_ID"))
-                .arg(required("section", "SECTION|none")),
-        )
         .subcommand(id_command("close", "tab_id", "Close a tab"))
         .subcommand(tab_doc_command())
-}
-
-fn pin_section_command() -> Command {
-    Command::new("pin-section")
-        .about("Named sections inside Pinned (Rails or Alex edit them)")
-        .subcommand(
-            Command::new("list")
-                .about("List sections and their pinned tabs")
-                .arg(flag("json")),
-        )
-        .subcommand(
-            Command::new("create")
-                .about("Create a section (at the end, or after another)")
-                .arg(required("name", "NAME"))
-                .arg(option("after", "NAME")),
-        )
-        .subcommand(
-            Command::new("rename")
-                .about("Rename a section")
-                .arg(required("name", "NAME"))
-                .arg(required("new_name", "NEW_NAME")),
-        )
-        .subcommand(
-            Command::new("delete")
-                .about("Delete a section; its tabs stay pinned, unsectioned")
-                .arg(required("name", "NAME")),
-        )
-        .subcommand(
-            Command::new("move")
-                .about("Move a section to an index (0 is the first section)")
-                .arg(required("name", "NAME"))
-                .arg(option("index", "N").required(true)),
-        )
 }
 
 fn tab_doc_command() -> Command {

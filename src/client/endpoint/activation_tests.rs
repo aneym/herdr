@@ -1919,7 +1919,6 @@ fn pin_in_flight_on_inactive_machine_holds_its_handoff_until_answered() {
                 tab_id: "remote-tab".into(),
                 pinned: true,
                 priority: None,
-                section: None,
             }),
         }),
     };
