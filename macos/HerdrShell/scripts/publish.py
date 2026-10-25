@@ -38,17 +38,18 @@ picked up on the next fanout. Install: macos/HerdrShell/scripts/install-publish.
 from contextlib import contextmanager
 from functools import wraps
 import fcntl
-import hashlib
 import json
 import os
 import plistlib
-import shlex
 import shutil
 import subprocess
 import sys
 import time
 import tempfile
 from publish_fetch import shared_fetch
+from publish_build_lock import studio_build_lock
+from publish_data import data
+from publish_transport import REMOTE_DELIVER, REMOTE_INSTALL, on, probe, send_server_config
 
 HOME = os.path.expanduser("~")
 REPO = os.environ.get("HERDR_REPO", "/Volumes/StudioExt/repos/herdr")
@@ -58,11 +59,10 @@ TARGETS = os.environ.get("HERDR_SHELL_TARGETS", f"{HOME}/.config/herdr-shell/tar
 LOGDIR = f"{HOME}/.cache/herdr-shell-publish"
 LOCK = f"{LOGDIR}/publish.lock"
 RELEASES = f"{HOME}/Library/Caches/herdr-shell-publish/releases"
-# Each build snapshots a ~20 MB app bundle; keep only the newest few (19 had piled up by 2026-10-09).
+
 KEEP_RELEASES = int(os.environ.get("HERDR_SHELL_KEEP_RELEASES", "5"))
 STAGE = f"{HOME}/Library/Application Support/HerdrShell"
-SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=8"]
-# Run from a git hook, the environment carries GIT_DIR and friends for the pushing worktree.
+
 for _k in [k for k in os.environ if k.startswith("GIT_")]:
     del os.environ[_k]
 
@@ -89,72 +89,6 @@ def serialized_delivery(fn):
         with delivery_lock():
             return fn(*args, **kwargs)
     return locked
-
-
-BUILD_LOCK = os.environ.get("HERDR_STUDIO_BUILD_LOCK", f"{HOME}/.agent-rails/locks/studio-build")
-BUILD_LOCK_STALE = 30 * 60
-
-
-def build_lock_age():
-    """Seconds since the lock's owner file (or, before it is written, the lock dir) changed;
-    None once the lock is gone."""
-    for path in (f"{BUILD_LOCK}/owner", BUILD_LOCK):
-        try:
-            return time.time() - os.stat(path).st_mtime
-        except FileNotFoundError:
-            continue
-    return None
-
-
-def break_stale_build_lock():
-    """Breakers take a mutex and re-check the age inside it, so a lock another builder took
-    after this one saw the stale lock is never removed."""
-    mutex = f"{BUILD_LOCK}.break"
-    try:
-        os.mkdir(mutex)
-    except OSError:
-        return False
-    try:
-        age = build_lock_age()
-        if age is None or age <= BUILD_LOCK_STALE:
-            return False
-        aside = f"{BUILD_LOCK}.stale-{os.getpid()}"
-        try:
-            os.rename(BUILD_LOCK, aside)
-        except OSError:
-            return False
-        shutil.rmtree(aside, ignore_errors=True)
-        return True
-    finally:
-        os.rmdir(mutex)
-
-
-@contextmanager
-def studio_build_lock():
-    """Studio runs one build at a time (Rails orchestrator rule, 2026-10-06): the shared
-    mkdir lock with an owner file "<name> <epoch>", stale after 30 minutes."""
-    os.makedirs(os.path.dirname(BUILD_LOCK), exist_ok=True)
-    announced = False
-    while True:
-        try:
-            os.mkdir(BUILD_LOCK)
-            break
-        except FileExistsError:
-            age = build_lock_age()
-            if age is None:
-                continue  # released between the mkdir and the stat
-            if age > BUILD_LOCK_STALE and break_stale_build_lock():
-                continue
-            if not announced:
-                log("waiting for the studio-build lock")
-                announced = True
-            time.sleep(20)
-    try:
-        with open(f"{BUILD_LOCK}/owner", "w") as f:
-            f.write(f"herdr-shell-publish {int(time.time())}\n")
-        yield
-    finally:
-        shutil.rmtree(BUILD_LOCK, ignore_errors=True)
 
 
 def git(*a):
@@ -306,13 +240,13 @@ def prune_releases():
 def publish(ref):
     sha = git("rev-parse", "--verify", ref + "^{commit}")
     log(f"build {ref} = {sha[:12]}")
-    # release.sh comes from the commit being built: check it out in the release worktree first.
+
     wt = release_worktree()
     subprocess.run(["git", "-C", wt, "checkout", "-q", "--detach", sha], check=True)
     script = f"{wt}/macos/HerdrShell/scripts/release.sh"
-    # release.sh stages Studio itself; hold the delivery lock through the build and the read of
-    # what it staged, so a local (Studio) fanout never swaps staged/ in between.
-    with open(f"{LOGDIR}/build.log", "a") as out, studio_build_lock(), delivery_lock():
+
+
+    with open(f"{LOGDIR}/build.log", "a") as out, studio_build_lock(log), delivery_lock():
         st = probe({"local": True})
         if st is None or st.get("installed_app") not in ("0", "1"):
             log("studio build: installed app state unknown")
@@ -337,7 +271,7 @@ def publish(ref):
     if not same(meta.get("commit", ""), sha):
         log(f"FAIL staged.json names {meta.get('commit')} after building {sha[:12]}")
         return False
-    # Snapshot the build output, never Studio's consumable Update staging directory.
+
     os.makedirs(RELEASES, exist_ok=True)
     snapshot = f"{RELEASES}/{sha}"
     tmp = tempfile.mkdtemp(prefix=f".{sha}.", dir=RELEASES)
@@ -375,74 +309,6 @@ def publish(ref):
     return True
 
 
-REMOTE_PROBE = r'''
-S="$HOME/Library/Application Support/HerdrShell"
-i=$(/usr/libexec/PlistBuddy -c "Print :HerdrShellCommit" "$HOME/Applications/Herdr Shell.app/Contents/Info.plist" 2>/dev/null)
-s=$(/usr/bin/plutil -extract commit raw -o - "$S/staged.json" 2>/dev/null)
-a=$(/usr/libexec/PlistBuddy -c "Print :HerdrShellCommit" "$S/staged/Herdr Shell.app/Contents/Info.plist" 2>/dev/null)
-c=$(/usr/bin/mdfind "kMDItemCFBundleIdentifier == 'com.aneyman.herdr-shell'" 2>/dev/null | wc -l | tr -d ' ')
-if [ -d "$HOME/Applications/Herdr Shell.app" ]; then e=1; else e=0; i=""; fi
-echo "installed_app=$e"; echo "installed=$i"; echo "staged=$s"; echo "staged_app=$a"; echo "spotlight_copies=$c"
-'''
-
-# Raycast and Spotlight list one app per bundle id, and Herdr Shell vanished from them
-# behind seven staged copies left in Application Support. Keep only the current staged
-# release, inside a .noindex folder Spotlight skips, and out of LaunchServices.
-PRUNE_STAGED = r'''
-LSR=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
-R="$S/releases.noindex"
-keep=$(readlink "$S/staged" 2>/dev/null || true)
-for old in "$S"/releases/incoming.* "$R"/incoming.* "$S"/prev-*.app; do
-    [ -e "$old" ] || [ -L "$old" ] || continue
-    [ "$old" = "$keep" ] && continue
-    find "$old" -maxdepth 2 -name '*.app' -prune -exec "$LSR" -u {} \; 2>/dev/null || true
-    rm -rf "$old"
-done
-rmdir "$S/releases" 2>/dev/null || true
-[ -d "$keep" ] && { find "$keep" -maxdepth 2 -name '*.app' -prune -exec "$LSR" -u {} \; 2>/dev/null || true; }
-'''
-
-# Both files live behind one staged directory pointer, swapped only after verification.
-REMOTE_DELIVER = r'''
-set -e
-S="$HOME/Library/Application Support/HerdrShell"
-mkdir -p "$S/releases.noindex"
-IN=$(mktemp -d "$S/releases.noindex/incoming.XXXXXX")
-trap 'rm -rf "$IN"' EXIT
-tar -xzf - -C "$IN"
-/usr/bin/codesign --verify "$IN/Herdr Shell.app"
-# Migrate the old layout once; subsequent deliveries replace a symlink atomically.
-if [ -d "$S/staged" ] && [ ! -L "$S/staged" ]; then
-    mv "$S/staged" "$IN/legacy"
-fi
-if [ ! -L "$S/staged.json" ]; then
-    rm -f "$S/staged.json"
-    ln -s staged/release.json "$S/staged.json"
-fi
-LINK="$IN.pointer"
-ln -s "$IN" "$LINK"
-/bin/mv -fh "$LINK" "$S/staged"
-trap - EXIT
-''' + PRUNE_STAGED + r'''
-echo delivered
-'''
-
-
-def on(t, script):
-    """argv that runs script on target t: over ssh, or here for a "local" target (Studio)."""
-    if t.get("local"):
-        return ["/bin/sh", "-c", script]
-    return t["ssh"][:1] + SSH_OPTS + t["ssh"][1:] + ["/bin/sh", "-c", shlex.quote(script)]
-
-
-def probe(t):
-    r = subprocess.run(on(t, REMOTE_PROBE),
-                       capture_output=True, text=True, timeout=60)
-    if r.returncode != 0:
-        return None
-    return dict(l.split("=", 1) for l in r.stdout.splitlines() if "=" in l)
-
-
 @serialized_delivery
 def fanout():
     rel = release()
@@ -462,7 +328,7 @@ def fanout():
             log(f"{name}: unreachable, will retry")
             continue
         if t.get("server") and not t.get("local"):
-            send_server_config(t)
+            send_server_config(t, log)
         if not can_deliver(st.get("installed", ""), commit, name):
             continue
         if same(st.get("staged", ""), commit) and same(st.get("staged_app", ""), commit):
@@ -486,64 +352,6 @@ def fanout():
             log(f"{name}: staged {commit} (installed {st.get('installed') or 'none'})")
         elif r is not None:
             log(f"{name}: FAIL deliver {commit}: {(r.stderr or r.stdout).strip()[-300:]}")
-
-
-
-# A target's "server" entry is how its app reaches the herdr server for Park, Resume and
-# Approve (RemoteActions). Written once; a hand-edited server.json on the target wins.
-REMOTE_SERVER = r'''
-C="$HOME/.config/herdr-shell/server.json"
-[ -e "$C" ] && { echo kept; exit 0; }
-mkdir -p "$HOME/.config/herdr-shell"
-T="$C.tmp.$$"
-cat > "$T" || { rm -f "$T"; exit 1; }
-# ln never replaces: a server.json made since the check above wins.
-if ln "$T" "$C" 2>/dev/null; then echo written; else echo kept; fi
-rm -f "$T"
-'''
-
-
-def send_server_config(t):
-    try:
-        r = subprocess.run(on(t, REMOTE_SERVER),
-                           input=json.dumps(t["server"]), capture_output=True, text=True, timeout=60)
-    except (OSError, subprocess.TimeoutExpired) as e:
-        log(f"{t.get('name', '?')}: FAIL server config: {e}")
-        return
-    if "written" in r.stdout:
-        log(f"{t.get('name', '?')}: wrote server.json")
-    elif r.returncode != 0:
-        log(f"{t.get('name', '?')}: FAIL server config: {(r.stderr or r.stdout).strip()[-200:]}")
-
-
-REMOTE_INSTALL = r'''
-set -e
-if pgrep -x HerdrShell >/dev/null; then echo running; exit 3; fi
-A="$HOME/Applications"
-mkdir -p "$A"
-IN="$A/.herdr-shell-incoming"
-rm -rf "$IN"; mkdir "$IN"
-tar -xzf - -C "$IN"
-/usr/bin/codesign --verify "$IN/Herdr Shell.app"
-rm -rf "$A/Herdr Shell.app.previous"
-[ -d "$A/Herdr Shell.app" ] && mv "$A/Herdr Shell.app" "$A/Herdr Shell.app.previous"
-mv "$IN/Herdr Shell.app" "$A/Herdr Shell.app"
-rm -rf "$IN" "$A/Herdr Shell.app.previous"
-S="$HOME/Library/Application Support/HerdrShell"
-# A staged release from the old layout moves under .noindex; the app is not running.
-cur=$(readlink "$S/staged" 2>/dev/null || true)
-case "$cur" in "$S"/releases/incoming.*)
-    mkdir -p "$S/releases.noindex"
-    new="$S/releases.noindex/${cur##*/}"
-    mv "$cur" "$new"
-    ln -s "$new" "$new.pointer"
-    /bin/mv -fh "$new.pointer" "$S/staged";;
-esac
-''' + PRUNE_STAGED + r'''
-"$LSR" -f "$A/Herdr Shell.app" || true
-/usr/bin/mdimport "$A/Herdr Shell.app" 2>/dev/null || true
-echo installed
-'''
 
 
 @serialized_delivery
@@ -576,76 +384,8 @@ def install(name):
         sys.exit(f"{name}: install failed: {(r.stdout + r.stderr).strip()[-300:]}")
 
 
-DATA_DIR = f"{HOME}/.agent-rails/herdr"
-DATA_FILES = ("lanes.json", "areas.json", "modes.json", "overlay.json")
-
-REMOTE_DATA = r'''
-set -e
-D="$HOME/.agent-rails/herdr"
-mkdir -p "$D"
-IN=$(mktemp -d "$D/.incoming.XXXXXX")
-tar -xf - -C "$IN"
-for f in "$IN"/*.json; do mv "$f" "$D/$(basename "$f")"; done
-rmdir "$IN"
-echo synced
-'''
-
-
-@serialized_delivery
-def data():
-    """Push the Areas/Parked inputs to each target when their content changed."""
-    have = [f for f in DATA_FILES if os.path.isfile(f"{DATA_DIR}/{f}")]
-    if not have:
-        return
-    # Hash and send the same snapshot even if Studio updates a file during delivery.
-    with tempfile.TemporaryDirectory(prefix="herdr-data-", dir=LOGDIR) as snapshot:
-        digests = {}
-        for f in have:
-            shutil.copyfile(f"{DATA_DIR}/{f}", f"{snapshot}/{f}")
-            with open(f"{snapshot}/{f}", "rb") as fh:
-                digests[f] = hashlib.sha256(fh.read()).hexdigest()
-        send_data(snapshot, digests)
-
-
-def send_data(snapshot, digests):
-    state_path = f"{LOGDIR}/data-state.json"
-    try:
-        with open(state_path) as fh:
-            state = json.load(fh)
-    except (OSError, ValueError):
-        state = {}
-    for t in targets():
-        if t.get("local"):
-            continue  # the data files already live here
-        name = t.get("name", "?")
-        sent = state.get(name)
-        if not isinstance(sent, dict):
-            sent = {}
-        changed = [f for f, digest in digests.items() if sent.get(f) != digest]
-        if not changed:
-            continue
-        tar = subprocess.Popen(["tar", "-cf", "-", "-C", snapshot, *changed], stdout=subprocess.PIPE)
-        try:
-            r = subprocess.run(on(t, REMOTE_DATA),
-                               stdin=tar.stdout, capture_output=True, text=True, timeout=60)
-        except (OSError, subprocess.TimeoutExpired):
-            r = None
-        tar.stdout.close()
-        tar_code = tar.wait()
-        if r is not None and r.returncode == 0 and tar_code == 0 and "synced" in r.stdout:
-            state[name] = {**sent, **{f: digests[f] for f in changed}}
-            state.pop(f"{name}.down", None)
-        elif not state.get(f"{name}.down"):
-            state[f"{name}.down"] = True
-            log(f"{name}: data sync failed, will retry quietly")
-    os.makedirs(LOGDIR, exist_ok=True)
-    with open(state_path + ".tmp", "w") as fh:
-        json.dump(state, fh)
-    os.replace(state_path + ".tmp", state_path)
-
-
-def fetch():
-    shared_fetch(REPO, branch(), LOGDIR)
+def fetch(max_age=60):
+    shared_fetch(REPO, branch(), LOGDIR, max_age=max_age)
 
 
 QUIET = float(os.environ.get("HERDR_SHELL_QUIET", "20"))
@@ -659,7 +399,7 @@ def settled(ref):
     while time.time() - since < QUIET and time.time() - start < QUIET_MAX:
         time.sleep(min(5, QUIET))
         try:
-            fetch()
+            fetch(max_age=0)
         except (OSError, subprocess.TimeoutExpired):
             pass
         now = git("rev-parse", "--verify", ref)
@@ -674,7 +414,7 @@ def auto(refetch=False):
         try:
             fcntl.flock(lk, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            # A publish is running; it re-reads the branch when it finishes.
+
             return
         if refetch:
             try:
@@ -743,7 +483,8 @@ def main():
     elif a and a[0] == "install" and len(a) == 2:
         install(a[1])
     elif a and a[0] == "data":
-        data()
+        with delivery_lock():
+            data(LOGDIR, targets(), log)
     elif a and a[0] == "status":
         status()
     else:

@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 
-def shared_fetch(repo, branch, logdir):
+def shared_fetch(repo, branch, logdir, max_age=60):
     common = subprocess.run(
         ['git', '-C', repo, 'rev-parse', '--path-format=absolute', '--git-common-dir'],
         capture_output=True, text=True, check=True,
@@ -19,7 +19,7 @@ def shared_fetch(repo, branch, logdir):
     ref = f'refs/remotes/origin/{branch}'
     with (directory / f'fetch-{key}.lock').open('a') as lock:
         try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(lock, fcntl.LOCK_EX | (fcntl.LOCK_NB if max_age else 0))
         except BlockingIOError:
             return False
         tip = subprocess.run(['git', '-C', repo, 'rev-parse', '--verify', ref], capture_output=True, text=True).stdout.strip()
@@ -28,7 +28,7 @@ def shared_fetch(repo, branch, logdir):
         except (OSError, ValueError):
             state = {}
         age = time.time() - state.get('finished_at', 0)
-        if tip and tip == state.get('sha') and 0 <= age < (60 if state.get('ok') else 30):
+        if tip and tip == state.get('sha') and 0 <= age < (max_age if state.get('ok') else min(max_age, 30)):
             return False
         started = time.monotonic()
         ok = False

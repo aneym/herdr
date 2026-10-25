@@ -15,7 +15,9 @@ BIN="$HOME/.local/bin/herdr-shell-publish"
 LABEL=com.aneyman.herdr-shell-fanout
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 
-install -m 644 "$D/publish_fetch.py" "$HOME/.local/bin/publish_fetch.py"
+for module in publish_fetch publish_build_lock publish_transport publish_data; do
+  install -m 644 "$D/$module.py" "$HOME/.local/bin/$module.py"
+done
 install -m 755 "$D/publish.py" "$BIN"
 install -m 755 "$D/../bin/herdr-shell-remote" "$HOME/.local/bin/herdr-shell-remote"
 
