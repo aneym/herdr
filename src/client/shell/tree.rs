@@ -103,18 +103,10 @@ pub(super) fn factory_goal_choices(
     choices
 }
 
-fn canonical_factory_section(section: &str) -> &str {
-    if section == "REVIEWING" {
-        "READY FOR REVIEW"
-    } else {
-        section
-    }
-}
-
 fn valid_factory_section(section: &str) -> bool {
     matches!(
         section,
-        "ORCHESTRATOR" | "READY FOR REVIEW" | "SCOPING" | "IMPLEMENTING" | "MONITORING"
+        "ORCHESTRATOR" | "NEEDS YOU" | "WORKING" | "FINISHED"
     )
 }
 
@@ -203,12 +195,6 @@ impl ClientTreeChrome {
             factory_sections_collapsed: saved
                 .factory_sections_collapsed
                 .into_iter()
-                .map(|key| match key.rsplit_once(':') {
-                    Some((space, section)) => {
-                        format!("{space}:{}", canonical_factory_section(section))
-                    }
-                    None => key,
-                })
                 .filter(|key| {
                     key.rsplit_once(':').is_some_and(|(space, section)| {
                         !space.is_empty() && valid_factory_section(section)
@@ -221,7 +207,6 @@ impl ClientTreeChrome {
             factory_section_focus: saved
                 .factory_section_focus
                 .into_iter()
-                .map(|(space, section)| (space, canonical_factory_section(&section).to_owned()))
                 .filter(|(space, section)| !space.is_empty() && valid_factory_section(section))
                 .collect(),
         }
@@ -1022,7 +1007,7 @@ pub(super) fn tree_list_entries_with_overlay(
     }
     let mut out = folded_pinned_tab_entries(snapshot, overlay, tree.hidden_agents_expanded);
     if let Some(overlay) =
-        overlay.filter(|overlay| overlay.tabs.values().any(|tag| tag.section.is_some()))
+        overlay.filter(|overlay| overlay.tabs.values().any(|tag| tag.home.is_some()))
     {
         let choices = factory_goal_choices(overlay);
         if !choices.is_empty() {
@@ -1109,7 +1094,7 @@ pub(super) fn tree_list_entries_with_overlay(
                             tab.workspace_id == *workspace_id
                                 && overlay
                                     .tab(&tab.tab_id)
-                                    .is_some_and(|tag| tag.section.is_some())
+                                    .is_some_and(|tag| tag.home.is_some())
                         })
                     {
                         let mut report = super::sidebar_report::WorkspaceReport::new(
@@ -1127,7 +1112,9 @@ pub(super) fn tree_list_entries_with_overlay(
                                 report.add(
                                     &tab.tab_id,
                                     tag.kind,
-                                    super::sidebar_report::section_label(tag.section)
+                                    tag.home
+                                        .as_ref()
+                                        .map(|home| home.state.as_str())
                                         .map(str::to_owned),
                                     tag.parent.clone(),
                                     "space_collapsed",
@@ -1377,7 +1364,7 @@ fn append_factory_space(
     indent: u8,
     agent_tabs: &HashSet<&str>,
 ) {
-    use crate::factory_overlay::{TabKind, TabMode, TabSection};
+    use crate::factory_overlay::{TabKind, TabMode};
     let start = out.len();
     let sectioned = snapshot
         .tabs
@@ -1386,7 +1373,7 @@ fn append_factory_space(
         .any(|tab| {
             overlay
                 .tab(&tab.tab_id)
-                .is_some_and(|tag| tag.section.is_some())
+                .is_some_and(|tag| tag.home.is_some())
         });
     let choices = factory_goal_choices(overlay);
     let filter = tree.factory_goal_filter.as_deref().filter(|value| {
@@ -1480,7 +1467,9 @@ fn append_factory_space(
         .iter()
         .filter(|lane| lane_mode(lane) == TabMode::Active)
         .filter(|lane| {
-            overlay.tab(&lane.tab_id).and_then(|tag| tag.section) != Some(TabSection::Scoping)
+            overlay
+                .tab(&lane.tab_id)
+                .is_none_or(|tag| tag.scope_url.is_none())
         })
         .filter_map(|lane| {
             let primary = snapshot
@@ -1512,11 +1501,11 @@ fn append_factory_space(
         }
         (current != tab_id).then(|| current.to_owned())
     };
-    let lane_section = |lane: &crate::protocol::ClientShellTab| {
+    let lane_state = |lane: &crate::protocol::ClientShellTab| {
         overlay
             .tab(&lane.tab_id)
-            .and_then(|tag| tag.section)
-            .unwrap_or(TabSection::Implementing)
+            .and_then(|tag| tag.home.as_ref())
+            .map_or("working", |home| home.state.as_str())
     };
     let group_state = |members: &[&crate::protocol::ClientShellTab]| {
         let member_ids = members
@@ -1584,7 +1573,10 @@ fn append_factory_space(
             .filter(|lane| {
                 lane_mode(lane) == TabMode::Active
                     && grouped_root(&lane.tab_id).is_none()
-                    && lane_section(lane) == TabSection::Orchestrator
+                    && overlay
+                        .tab(&lane.tab_id)
+                        .and_then(|tag| tag.home.as_ref())
+                        .is_some_and(|home| home.class == "owner")
             })
             .collect::<Vec<_>>()
     } else {
@@ -1985,27 +1977,22 @@ fn append_factory_space(
         push_lane(out, lane, indent, false);
     }
     if sectioned {
-        for (section, label) in [
-            (TabSection::Reviewing, "READY FOR REVIEW"),
-            (TabSection::Scoping, "SCOPING"),
-            (TabSection::Implementing, "IMPLEMENTING"),
-            (TabSection::Monitoring, "MONITORING"),
-        ] {
+        for (section, label) in [("needs_you", "NEEDS YOU"), ("working", "WORKING")] {
             let members = lanes
                 .iter()
                 .copied()
                 .filter(|lane| {
                     lane_mode(lane) == TabMode::Active
                         && grouped_root(&lane.tab_id).is_none()
-                        && lane_section(lane) == section
+                        && lane_state(lane) == section
                 })
                 .collect::<Vec<_>>();
-            if members.is_empty() && (section != TabSection::Implementing || ordinary.is_empty()) {
+            if members.is_empty() && (section != "working" || ordinary.is_empty()) {
                 continue;
             }
             // Section headers carry no key hints (Alex, 2026-10-06); the
             // review count is the only right-hand text.
-            let right = if section == TabSection::Reviewing {
+            let right = if section == "needs_you" {
                 members.len().to_string()
             } else {
                 String::new()
@@ -2019,9 +2006,9 @@ fn append_factory_space(
                     collapsed: false,
                     focused: false,
                     alert: group_state(&members).0
-                        || (section == TabSection::Implementing && group_state(&ordinary).0),
+                        || (section == "working" && group_state(&ordinary).0),
                     count: members.len()
-                        + if section == TabSection::Implementing {
+                        + if section == "working" {
                             ordinary.len()
                         } else {
                             0
@@ -2031,7 +2018,7 @@ fn append_factory_space(
             for lane in members {
                 push_lane(out, lane, indent, false);
             }
-            if section == TabSection::Implementing {
+            if section == "working" {
                 for tab in &ordinary {
                     out.push(factory_row(
                         snapshot, rows, overlay, tab, indent, false, false,
@@ -2092,7 +2079,7 @@ fn append_factory_space(
                     && (group != FactoryGroupKind::Closed
                         || (sectioned
                             && grouped_root(&lane.tab_id).is_none()
-                            && lane_section(lane) == TabSection::Closed))
+                            && lane_state(lane) == "finished"))
             })
             .collect::<Vec<_>>();
         let roots = if sectioned && group == FactoryGroupKind::Automations {
@@ -2211,7 +2198,7 @@ fn append_factory_space(
                 {
                     Some("services")
                 } else {
-                    super::sidebar_report::section_label(tag.section)
+                    tag.home.as_ref().map(|home| home.state.as_str())
                 };
                 label.map(str::to_owned)
             });
@@ -2225,7 +2212,11 @@ fn append_factory_space(
                 "parked_folded"
             } else if tag.mode == TabMode::Auto {
                 "auto_folded"
-            } else if tag.section == Some(TabSection::Closed) {
+            } else if tag
+                .home
+                .as_ref()
+                .is_some_and(|home| home.state == "finished")
+            {
                 "closed_folded"
             } else if under.is_some() {
                 "group_folded"
@@ -2601,13 +2592,15 @@ fn factory_row(
         reviewing: !background
             && tag.is_some_and(|tag| {
                 tag.kind == crate::factory_overlay::TabKind::Lane
-                    && tag.section == Some(crate::factory_overlay::TabSection::Reviewing)
+                    && tag
+                        .home
+                        .as_ref()
+                        .is_some_and(|home| home.state == "needs_you")
             }),
         review_url: tag.and_then(|tag| tag.review_url.clone()),
         scoping: !background
             && tag.is_some_and(|tag| {
-                tag.kind == crate::factory_overlay::TabKind::Lane
-                    && tag.section == Some(crate::factory_overlay::TabSection::Scoping)
+                tag.kind == crate::factory_overlay::TabKind::Lane && tag.scope_url.is_some()
             }),
         scope_url: tag.and_then(|tag| tag.scope_url.clone()),
         badge: tag.and_then(|tag| tag.badge.clone()),

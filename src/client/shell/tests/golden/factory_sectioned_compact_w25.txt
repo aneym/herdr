@@ -3,9 +3,8 @@
  agent-rails     3 ⚲ + ▾ 
   ▾ ORCHESTRATOR       ◎ 
   ▸ ● orchestrator    1⚲ 
-  ▾ SCOPING            ◎ 
+  ▾ WORKING            ◎ 
   ▸ ● shared connect… 2⚲ 
-  ▾ IMPLEMENTING       ◎ 
     ● plain-a          ⚲ 
     ● plain-b          ⚲ 
   ▸ closed 1             
@@ -15,6 +14,7 @@
  poker             ⚲ + ▾ 
   LANES                  
     ● poker coach      ⚲ 
+                         
                          
                          
                          

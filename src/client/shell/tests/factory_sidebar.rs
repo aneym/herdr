@@ -1,3 +1,11 @@
+fn home(state: &str) -> crate::factory_overlay::HomeTag {
+    crate::factory_overlay::HomeTag {
+        state: if state == "owner" { "working" } else { state }.into(),
+        class: if state == "owner" { "owner" } else { "lane" }.into(),
+        ..Default::default()
+    }
+}
+
 use super::*;
 use crate::client::shell::tree::ClientTreeChrome;
 use crate::factory_overlay::{
@@ -2013,9 +2021,8 @@ fn grouped_workflow_fixture() -> (ClientShellSnapshot, FactoryOverlay) {
 
 #[test]
 fn collapsed_factory_groups_show_grouped_workflow_alerts_and_work() {
-    use crate::factory_overlay::TabSection;
     for (mode, section, label) in [
-        (TabMode::Active, Some(TabSection::Closed), "closed"),
+        (TabMode::Active, Some(home("finished")), "closed"),
         (TabMode::Parked, None, "parked"),
         (TabMode::Auto, None, "services"),
     ] {
@@ -2024,7 +2031,7 @@ fn collapsed_factory_groups_show_grouped_workflow_alerts_and_work() {
         overlay.tabs.get_mut("lane-b").unwrap().runs.clear();
         let root = overlay.tabs.get_mut("lane-a").unwrap();
         root.mode = mode;
-        root.section = section;
+        root.home = section;
         for (status, attention, busy, run, alert, working) in [
             (
                 AgentStatus::Blocked,
@@ -2112,10 +2119,9 @@ fn collapsed_factory_groups_show_grouped_workflow_alerts_and_work() {
 
 #[test]
 fn collapsed_idle_group_shows_grouped_done_run_attention() {
-    use crate::factory_overlay::TabSection;
     let (mut snapshot, mut overlay) = grouped_workflow_fixture();
     snapshot.tabs.retain(|tab| !tab.tab_id.starts_with("wf-"));
-    overlay.tabs.get_mut("lane-a").unwrap().section = Some(TabSection::Closed);
+    overlay.tabs.get_mut("lane-a").unwrap().home = Some(home("finished"));
     let run = &mut overlay.tabs.get_mut("lane-b").unwrap().runs[0];
     run.done = true;
     run.attention = Attention::Act;
@@ -2935,7 +2941,6 @@ fn factory_status_glyph_colors() {
 
 #[test]
 fn factory_sections_render_and_idle_click_persists() {
-    use crate::factory_overlay::TabSection;
     let (mut snapshot, mut overlay) = fixture();
     snapshot.tabs.retain(|tab| {
         matches!(
@@ -2950,12 +2955,12 @@ fn factory_sections_render_and_idle_click_persists() {
         .unwrap()
         .clone();
     for (id, section) in [
-        ("waiting-lane", Some(TabSection::Reviewing)),
-        ("idle-lane", Some(TabSection::Closed)),
-        ("orchestrator-lane", Some(TabSection::Orchestrator)),
+        ("waiting-lane", Some(home("needs_you"))),
+        ("idle-lane", Some(home("finished"))),
+        ("orchestrator-lane", Some(home("owner"))),
         ("untagged-lane", None),
-        ("review-second", Some(TabSection::Reviewing)),
-        ("monitor-lane", Some(TabSection::Monitoring)),
+        ("review-second", Some(home("needs_you"))),
+        ("monitor-lane", Some(home("working"))),
     ] {
         let mut tab = template.clone();
         tab.tab_id = id.into();
@@ -2965,29 +2970,29 @@ fn factory_sections_render_and_idle_click_persists() {
             id.into(),
             TabTag {
                 kind: TabKind::Lane,
-                section,
+                home: section,
                 ..Default::default()
             },
         );
     }
-    overlay.tabs.get_mut("lane-a").unwrap().section = Some(TabSection::Scoping);
+    overlay.tabs.get_mut("lane-a").unwrap().home = Some(home("working"));
     relabel(&mut snapshot, "lane-a", "[Scoping] shared connections");
-    overlay.tabs.get_mut("lane-b").unwrap().section = Some(TabSection::Implementing);
+    overlay.tabs.get_mut("lane-b").unwrap().home = Some(home("working"));
     let (rows, hits, _) =
         rendered_factory_rows_with_gap(&snapshot, &overlay, &ClientTreeChrome::default(), 40, 0);
     let find = |name: &str| rows.iter().position(|row| row.contains(name)).unwrap();
     assert!(find("ORCHESTRATOR") < find("orchestrator-lane"));
-    assert!(find("orchestrator-lane") < find("READY FOR REVIEW"));
-    assert!(find("waiting-lane") < find("SCOPING"));
-    assert!(find("SCOPING") < find("shared connections"));
-    assert!(find("shared connections") < find("IMPLEMENTING"));
-    assert!(find("IMPLEMENTING") < find("untagged-lane"));
+    assert!(find("orchestrator-lane") < find("NEEDS YOU"));
+    assert!(find("waiting-lane") < find("WORKING"));
+    assert!(find("WORKING") < find("shared connections"));
+    assert!(find("shared connections") < find("monitor-lane"));
+    assert!(find("WORKING") < find("untagged-lane"));
     assert!(find("untagged-lane") < find("plain-a"));
     assert!(find("plain-a") < find("closed 1"));
-    assert!(find("READY FOR REVIEW") < find("waiting-lane"));
-    assert!(find("IMPLEMENTING") < find("MONITORING"));
+    assert!(find("NEEDS YOU") < find("waiting-lane"));
+    assert!(find("WORKING") < find("monitor-lane"));
     assert!(find("monitor-lane") < find("closed 1"));
-    assert!(rows[find("READY FOR REVIEW")].contains("2◎"));
+    assert!(rows[find("NEEDS YOU")].contains("2◎"));
     assert!(
         !rows.iter().any(|row| row.contains('⌘')),
         "section headers carry no key hints"
@@ -3097,21 +3102,17 @@ fn factory_sections_render_and_idle_click_persists() {
         snapshot.agents.push(agent);
     }
     for (id, section, name) in [
-        ("lane-a", TabSection::Scoping, "[Scoping] parent"),
-        ("lane-b", TabSection::Scoping, "[scoping] first child"),
-        ("lane-c", TabSection::Scoping, "[SCOPING] second child"),
-        (
-            "lane-inflight",
-            TabSection::Implementing,
-            "[scoping] in flight",
-        ),
+        ("lane-a", "working", "[Scoping] parent"),
+        ("lane-b", "working", "[scoping] first child"),
+        ("lane-c", "working", "[SCOPING] second child"),
+        ("lane-inflight", "working", "[scoping] in flight"),
     ] {
         let tag = overlay
             .tabs
             .entry(id.into())
             .or_insert_with(TabTag::default);
         tag.kind = TabKind::Lane;
-        tag.section = Some(section);
+        tag.home = Some(home(section));
         relabel(&mut snapshot, id, name);
     }
     let mut tree = ClientTreeChrome::default();
@@ -3144,8 +3145,7 @@ fn factory_sections_render_and_idle_click_persists() {
 
 #[test]
 fn scoping_lane_grouped_under_other_section_draws_flat_in_scoping() {
-    use crate::factory_overlay::TabSection;
-    for parent_section in [TabSection::Monitoring, TabSection::Scoping] {
+    for parent_section in ["needs_you", "working"] {
         let (mut snapshot, mut overlay) = fixture();
         snapshot
             .tabs
@@ -3159,8 +3159,10 @@ fn scoping_lane_grouped_under_other_section_draws_flat_in_scoping() {
             agent.group.parent_pane_id = parent.map(str::to_string);
             snapshot.agents.push(agent);
         }
-        overlay.tabs.get_mut("lane-a").unwrap().section = Some(parent_section);
-        overlay.tabs.get_mut("lane-b").unwrap().section = Some(TabSection::Scoping);
+        overlay.tabs.get_mut("lane-a").unwrap().home = Some(home(parent_section));
+        overlay.tabs.get_mut("lane-b").unwrap().home = Some(home("working"));
+        overlay.tabs.get_mut("lane-b").unwrap().scope_url =
+            Some("https://example.invalid/scope".into());
         overlay.tabs.get_mut("lane-b").unwrap().attention = Attention::Act;
         let mut tree = ClientTreeChrome::default();
         tree.factory_collapsed_lanes.insert("lane-a".into());
@@ -3180,11 +3182,8 @@ fn scoping_lane_grouped_under_other_section_draws_flat_in_scoping() {
             .iter()
             .find(|hit| hit.key == "plain-a")
             .unwrap();
-        let scoping = rows.iter().position(|row| row.contains("SCOPING")).unwrap();
-        let next_section = rows
-            .iter()
-            .position(|row| row.contains("IMPLEMENTING"))
-            .unwrap();
+        let scoping = rows.iter().position(|row| row.contains("WORKING")).unwrap();
+        let next_section = rows.len();
         assert!(
             scoping < child.rect.y as usize && (child.rect.y as usize) < next_section,
             "{rows:?}"
@@ -3206,7 +3205,6 @@ fn scoping_lane_grouped_under_other_section_draws_flat_in_scoping() {
 
 #[test]
 fn sectioned_grouped_child_and_parked_lane_keep_their_parent_groups() {
-    use crate::factory_overlay::TabSection;
     let (mut snapshot, mut overlay) = fixture();
     snapshot
         .tabs
@@ -3220,8 +3218,8 @@ fn sectioned_grouped_child_and_parked_lane_keep_their_parent_groups() {
         agent.group.parent_pane_id = parent.map(str::to_string);
         snapshot.agents.push(agent);
     }
-    overlay.tabs.get_mut("lane-a").unwrap().section = Some(TabSection::Implementing);
-    overlay.tabs.get_mut("lane-b").unwrap().section = Some(TabSection::Closed);
+    overlay.tabs.get_mut("lane-a").unwrap().home = Some(home("working"));
+    overlay.tabs.get_mut("lane-b").unwrap().home = Some(home("finished"));
     let mut parked = snapshot.tabs[0].clone();
     parked.tab_id = "parked-lane".into();
     parked.label = "parked-lane".into();
@@ -3231,7 +3229,7 @@ fn sectioned_grouped_child_and_parked_lane_keep_their_parent_groups() {
         TabTag {
             kind: TabKind::Lane,
             mode: TabMode::Parked,
-            section: Some(TabSection::Scoping),
+            home: Some(home("working")),
             ..Default::default()
         },
     );
@@ -3249,8 +3247,8 @@ fn sectioned_grouped_child_and_parked_lane_keep_their_parent_groups() {
         .find(|hit| hit.key == "lane-b")
         .unwrap();
     assert!(parent.rect.y < child.rect.y);
-    assert!(rows.iter().any(|row| row.contains("IMPLEMENTING")));
-    assert!(!rows.iter().any(|row| row.contains("SCOPING")
+    assert!(rows.iter().any(|row| row.contains("WORKING")));
+    assert!(!rows.iter().any(|row| row.contains("NEEDS YOU")
         || row.contains("closed 1")
         || row.contains("parked-lane")));
     assert!(rows.iter().any(|row| row.contains("parked 1")));
@@ -3262,16 +3260,15 @@ fn unknown_section_does_not_break_overlay_parse() {
         br#"{"version":1,"tabs":{"lane":{"kind":"lane","section":"bogus"}}}"#,
     )
     .unwrap();
-    assert_eq!(parsed.tabs["lane"].section, None);
+    assert_eq!(parsed.tabs["lane"].home, None);
 }
 
 #[test]
 fn factory_sectioned_collapsed_compact_frame_w25() {
-    use crate::factory_overlay::TabSection;
     let (mut snapshot, mut overlay) = lab_fixture();
-    overlay.tabs.get_mut("lane-a").unwrap().section = Some(TabSection::Scoping);
+    overlay.tabs.get_mut("lane-a").unwrap().home = Some(home("working"));
     relabel(&mut snapshot, "lane-a", "[scoping] shared connections");
-    overlay.tabs.get_mut("lane-b").unwrap().section = Some(TabSection::Closed);
+    overlay.tabs.get_mut("lane-b").unwrap().home = Some(home("finished"));
     let mut tree = ClientTreeChrome::default();
     tree.factory_collapsed_lanes.insert("lane-a".into());
     let (rows, _, _) = rendered_factory_rows_with_gap(&snapshot, &overlay, &tree, 25, 0);
@@ -3291,9 +3288,9 @@ fn legacy_sections_place_lanes_and_clean_implementing_labels() {
         .retain(|tab| matches!(tab.tab_id.as_str(), "lane-a" | "lane-b" | "plain-a"));
     let overlay = crate::factory_overlay::parse(
         r#"{"version":1,"tabs":{
-        "lane-a":{"kind":"lane","section":"inflight"},
-        "lane-b":{"kind":"lane","section":"idle"},
-        "plain-a":{"kind":"lane","section":"waiting"}
+        "lane-a":{"kind":"lane","home":{"state":"working"}},
+        "lane-b":{"kind":"lane","home":{"state":"working"}},
+        "plain-a":{"kind":"lane","home":{"state":"needs_you"}}
     }}"#
         .as_bytes(),
     )
@@ -3304,13 +3301,10 @@ fn legacy_sections_place_lanes_and_clean_implementing_labels() {
     // Width 27 keeps the cleaned labels whole beside the lane pin toggle (9f0d153f).
     let (rows, hits, _) =
         rendered_factory_rows_at_width(&snapshot, &overlay, &ClientTreeChrome::default(), 27);
-    let implementing = rows
-        .iter()
-        .position(|row| row.contains("IMPLEMENTING"))
-        .unwrap();
+    let implementing = rows.iter().position(|row| row.contains("WORKING")).unwrap();
     let reviewing = rows
         .iter()
-        .position(|row| row.contains("READY FOR REVIEW"))
+        .position(|row| row.contains("NEEDS YOU"))
         .unwrap();
     let review = hits
         .tree_headers
@@ -3334,12 +3328,11 @@ fn legacy_sections_place_lanes_and_clean_implementing_labels() {
 
 #[test]
 fn sectioned_parentless_workflow_lives_in_services_and_rolls_up_state() {
-    use crate::factory_overlay::TabSection;
     let (mut snapshot, mut overlay) = fixture();
     snapshot
         .tabs
         .retain(|tab| matches!(tab.tab_id.as_str(), "lane-a" | "wf-a"));
-    overlay.tabs.get_mut("lane-a").unwrap().section = Some(TabSection::Implementing);
+    overlay.tabs.get_mut("lane-a").unwrap().home = Some(home("working"));
     overlay.tabs.get_mut("wf-a").unwrap().parent = None;
     for (status, attention, busy, run, alert, working) in [
         (
@@ -3426,7 +3419,6 @@ fn sectioned_parentless_workflow_lives_in_services_and_rolls_up_state() {
 // headers have no controls. These cover visibility, hidden alerts, and restart
 // persistence without a test-only production seam.
 fn section_controls_fixture() -> (ClientShellSnapshot, FactoryOverlay) {
-    use crate::factory_overlay::TabSection;
     let (mut snapshot, mut overlay) = fixture();
     snapshot.tabs.retain(|tab| {
         matches!(
@@ -3435,8 +3427,8 @@ fn section_controls_fixture() -> (ClientShellSnapshot, FactoryOverlay) {
         )
     });
     snapshot.agents.clear();
-    overlay.tabs.get_mut("lane-a").unwrap().section = Some(TabSection::Reviewing);
-    overlay.tabs.get_mut("lane-b").unwrap().section = Some(TabSection::Scoping);
+    overlay.tabs.get_mut("lane-a").unwrap().home = Some(home("needs_you"));
+    overlay.tabs.get_mut("lane-b").unwrap().home = Some(home("working"));
     snapshot
         .tabs
         .iter_mut()
@@ -3446,7 +3438,7 @@ fn section_controls_fixture() -> (ClientShellSnapshot, FactoryOverlay) {
     let template = snapshot.tabs[1].clone();
     for (id, section, mode) in [
         ("service", None, TabMode::Auto),
-        ("closed-lane", Some(TabSection::Closed), TabMode::Active),
+        ("closed-lane", Some(home("finished")), TabMode::Active),
     ] {
         let mut tab = template.clone();
         tab.tab_id = id.into();
@@ -3457,7 +3449,7 @@ fn section_controls_fixture() -> (ClientShellSnapshot, FactoryOverlay) {
             id.into(),
             TabTag {
                 kind: TabKind::Lane,
-                section,
+                home: section,
                 mode,
                 ..Default::default()
             },
@@ -3490,20 +3482,20 @@ fn click_section_control(
 fn factory_section_label_collapses_restores_and_reports_hidden_blocked_member() {
     let (snapshot, overlay) = section_controls_fixture();
     let mut state = factory_state(snapshot, overlay);
-    let (rows, buffer) = click_section_control(&mut state, "READY FOR REVIEW", false);
+    let (rows, buffer) = click_section_control(&mut state, "NEEDS YOU", false);
     let y = rows
         .iter()
-        .position(|row| row.contains("READY FOR REVIEW"))
+        .position(|row| row.contains("NEEDS YOU"))
         .unwrap();
     assert!(
-        rows[y].contains("▸ READY FOR REVIEW") && rows[y].contains("1!"),
+        rows[y].contains("▸ NEEDS YOU") && rows[y].contains("1!"),
         "{rows:?}"
     );
     assert!(!rows.iter().any(|row| row.contains("lane-a")));
     let x = rows[y].chars().position(|c| c == '!').unwrap();
     assert_eq!(buffer[(x as u16, y as u16)].fg, state.config.palette.red);
-    let (rows, _) = click_section_control(&mut state, "READY FOR REVIEW", false);
-    assert!(rows.iter().any(|row| row.contains("▾ READY FOR REVIEW")));
+    let (rows, _) = click_section_control(&mut state, "NEEDS YOU", false);
+    assert!(rows.iter().any(|row| row.contains("▾ NEEDS YOU")));
     assert!(rows.iter().any(|row| row.contains("lane-a")));
     let (rows, _) = click_section_control(&mut state, "ORCHESTRATOR", false);
     assert!(rows.iter().any(|row| row.contains("▸ ORCHESTRATOR")));
@@ -3514,13 +3506,13 @@ fn factory_section_label_collapses_restores_and_reports_hidden_blocked_member() 
 fn factory_section_focus_hides_other_sections_groups_and_keeps_alert_reveal() {
     let (snapshot, overlay) = section_controls_fixture();
     let mut state = factory_state(snapshot, overlay);
-    let (rows, buffer) = click_section_control(&mut state, "SCOPING", true);
+    let (rows, buffer) = click_section_control(&mut state, "WORKING", true);
     assert!(rows
         .iter()
-        .any(|row| row.contains("SCOPING") && row.contains('✕')));
+        .any(|row| row.contains("WORKING") && row.contains('✕')));
     assert!(rows.iter().any(|row| row.contains("ORCHESTRATOR")));
     assert!(rows.iter().any(|row| row.contains("lane-b")));
-    assert!(!rows.iter().any(|row| row.contains("READY FOR REVIEW")
+    assert!(!rows.iter().any(|row| row.contains("NEEDS YOU")
         || row.contains("services")
         || row.contains("closed")
         || row.contains("background")));
@@ -3529,11 +3521,11 @@ fn factory_section_focus_hides_other_sections_groups_and_keeps_alert_reveal() {
         .position(|row| row.contains("show all · 4 more !"))
         .unwrap();
     assert_eq!(buffer[(1, y as u16)].fg, state.config.palette.red);
-    let (rows, _) = click_section_control(&mut state, "SCOPING", true);
-    assert!(rows.iter().any(|row| row.contains("READY FOR REVIEW")));
+    let (rows, _) = click_section_control(&mut state, "WORKING", true);
+    assert!(rows.iter().any(|row| row.contains("NEEDS YOU")));
     assert!(rows.iter().any(|row| row.contains("services")));
     assert!(rows.iter().any(|row| row.contains("closed")));
-    let (rows, _) = click_section_control(&mut state, "SCOPING", true);
+    let (rows, _) = click_section_control(&mut state, "WORKING", true);
     let y = rows
         .iter()
         .position(|row| row.contains("show all"))
@@ -3547,7 +3539,7 @@ fn factory_section_focus_hides_other_sections_groups_and_keeps_alert_reveal() {
     factory_click(&mut state, MouseEventKind::Up(MouseButton::Left), 3, y);
     let (rows, _, _) =
         rendered_factory_rows_at_width(&snapshot, &overlay, state.tree_chrome_mut(), 40);
-    assert!(rows.iter().any(|row| row.contains("READY FOR REVIEW")));
+    assert!(rows.iter().any(|row| row.contains("NEEDS YOU")));
     assert!(!rows.iter().any(|row| row.contains("show all")));
 }
 
@@ -3555,14 +3547,14 @@ fn factory_section_focus_hides_other_sections_groups_and_keeps_alert_reveal() {
 fn factory_section_preferences_preserve_controls_and_ignore_unknown_values() {
     let (snapshot, overlay) = section_controls_fixture();
     let mut state = factory_state(snapshot.clone(), overlay.clone());
-    click_section_control(&mut state, "READY FOR REVIEW", false);
-    click_section_control(&mut state, "SCOPING", true);
+    click_section_control(&mut state, "NEEDS YOU", false);
+    click_section_control(&mut state, "WORKING", true);
     let saved = serde_json::to_value(state.tree_chrome_mut().to_preferences()).unwrap();
     assert_eq!(
         saved["factory_sections_collapsed"],
-        serde_json::json!(["ws_1:READY FOR REVIEW"])
+        serde_json::json!(["ws_1:NEEDS YOU"])
     );
-    assert_eq!(saved["factory_section_focus"]["ws_1"], "SCOPING");
+    assert_eq!(saved["factory_section_focus"]["ws_1"], "WORKING");
     let mut saved = saved;
     saved["factory_sections_collapsed"]
         .as_array_mut()
@@ -3573,17 +3565,17 @@ fn factory_section_preferences_preserve_controls_and_ignore_unknown_values() {
     let clean = serde_json::to_value(tree.to_preferences()).unwrap();
     assert_eq!(
         clean["factory_sections_collapsed"],
-        serde_json::json!(["ws_1:READY FOR REVIEW"])
+        serde_json::json!(["ws_1:NEEDS YOU"])
     );
     assert!(clean["factory_section_focus"].get("ws_2").is_none());
     let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &tree, 40);
     assert!(rows
         .iter()
-        .any(|row| row.contains("SCOPING") && row.contains('✕')));
+        .any(|row| row.contains("WORKING") && row.contains('✕')));
     let mut state = factory_state(snapshot, overlay);
     *state.tree_chrome_mut() = tree;
-    let (rows, _) = click_section_control(&mut state, "SCOPING", true);
-    assert!(rows.iter().any(|row| row.contains("▸ READY FOR REVIEW")));
+    let (rows, _) = click_section_control(&mut state, "WORKING", true);
+    assert!(rows.iter().any(|row| row.contains("▸ NEEDS YOU")));
     assert!(!rows.iter().any(|row| row.contains("lane-a")));
 }
 
@@ -3591,29 +3583,29 @@ fn factory_section_preferences_preserve_controls_and_ignore_unknown_values() {
 fn factory_legacy_reviewing_preferences_restore_ready_for_review_controls() {
     let (snapshot, overlay) = section_controls_fixture();
     let mut saved = serde_json::to_value(ClientTreeChrome::default().to_preferences()).unwrap();
-    saved["factory_sections_collapsed"] = serde_json::json!(["ws_1:REVIEWING"]);
+    saved["factory_sections_collapsed"] = serde_json::json!(["ws_1:NEEDS YOU"]);
     let mut tree =
         ClientTreeChrome::from_preferences(serde_json::from_value(saved.clone()).unwrap());
     let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &tree, 40);
     assert!(
-        rows.iter().any(|row| row.contains("▸ READY FOR REVIEW")),
+        rows.iter().any(|row| row.contains("▸ NEEDS YOU")),
         "{rows:?}"
     );
     assert!(!rows.iter().any(|row| row.contains("lane-a")));
-    saved["factory_section_focus"] = serde_json::json!({"ws_1": "REVIEWING"});
+    saved["factory_section_focus"] = serde_json::json!({"ws_1": "NEEDS YOU"});
     tree = ClientTreeChrome::from_preferences(serde_json::from_value(saved).unwrap());
     let (rows, _, _) = rendered_factory_rows_at_width(&snapshot, &overlay, &tree, 40);
     assert!(rows
         .iter()
-        .any(|row| row.contains("READY FOR REVIEW") && row.contains('✕')));
+        .any(|row| row.contains("NEEDS YOU") && row.contains('✕')));
     assert!(rows.iter().any(|row| row.contains("lane-a")));
-    assert!(!rows.iter().any(|row| row.contains("SCOPING")));
+    assert!(!rows.iter().any(|row| row.contains("WORKING")));
 }
 
 #[test]
 fn ready_for_review_header_preserves_count_and_focus_at_narrow_width() {
     let (snapshot, overlay) = section_controls_fixture();
-    for (width, label) in [(40, "READY FOR REVIEW"), (20, "READY")] {
+    for (width, label) in [(40, "NEEDS YOU"), (20, "NEEDS YOU")] {
         let (rows, hits, _) = rendered_factory_rows_at_width(
             &snapshot,
             &overlay,
@@ -3623,7 +3615,7 @@ fn ready_for_review_header_preserves_count_and_focus_at_narrow_width() {
         let hit = hits
             .factory_sections
             .iter()
-            .find(|hit| hit.label == "READY FOR REVIEW")
+            .find(|hit| hit.label == "NEEDS YOU")
             .unwrap();
         let row = &rows[hit.rect.y as usize];
         assert!(
@@ -3642,7 +3634,7 @@ fn factory_section_context_menu_changes_visibility_without_endpoint_requests() {
         rendered_factory_rows_at_width(&snapshot, &overlay, state.tree_chrome_mut(), 40);
     let y = rows
         .iter()
-        .position(|row| row.contains("READY FOR REVIEW"))
+        .position(|row| row.contains("NEEDS YOU"))
         .unwrap() as u16;
     state.hits = hits;
     state.last_composed_size = Some((120, 60));
@@ -3656,17 +3648,17 @@ fn factory_section_context_menu_changes_visibility_without_endpoint_requests() {
             .iter()
             .map(|item| item.label.as_str())
             .collect::<Vec<_>>(),
-        ["Focus READY FOR REVIEW", "Collapse"]
+        ["Focus NEEDS YOU", "Collapse"]
     );
     let mut input = ClientShellInput::default();
     state.activate_context_menu_item(0, &mut input);
     assert!(input.actions.is_empty());
     let (rows, hits, _) =
         rendered_factory_rows_at_width(&snapshot, &overlay, state.tree_chrome_mut(), 40);
-    assert!(!rows.iter().any(|row| row.contains("SCOPING")));
+    assert!(!rows.iter().any(|row| row.contains("WORKING")));
     let y = rows
         .iter()
-        .position(|row| row.contains("READY FOR REVIEW"))
+        .position(|row| row.contains("NEEDS YOU"))
         .unwrap() as u16;
     state.hits = hits;
     factory_click(&mut state, MouseEventKind::Down(MouseButton::Right), 3, y);
@@ -3677,21 +3669,20 @@ fn factory_section_context_menu_changes_visibility_without_endpoint_requests() {
     state.activate_context_menu_item(0, &mut input);
     let (rows, _, _) =
         rendered_factory_rows_at_width(&snapshot, &overlay, state.tree_chrome_mut(), 40);
-    assert!(rows.iter().any(|row| row.contains("SCOPING")));
+    assert!(rows.iter().any(|row| row.contains("WORKING")));
 }
 
 #[test]
 fn reviewing_lane_links_render_and_open_without_focusing() {
-    use crate::factory_overlay::TabSection;
     for grouped in [false, true] {
         for (section, url) in [
             (
-                TabSection::Reviewing,
+                "needs_you",
                 Some("https://studio.tailf266ac.ts.net:8799/review"),
             ),
-            (TabSection::Reviewing, None),
+            ("needs_you", None),
             (
-                TabSection::Implementing,
+                "working",
                 Some("https://studio.tailf266ac.ts.net:8799/review"),
             ),
         ] {
@@ -3712,7 +3703,7 @@ fn reviewing_lane_links_render_and_open_without_focusing() {
             }
             for id in ["lane-a", "lane-b"] {
                 let mut value = serde_json::to_value(&overlay.tabs[id]).unwrap();
-                value["section"] = serde_json::to_value(section).unwrap();
+                value["home"] = serde_json::to_value(home(section)).unwrap();
                 value["review_url"] = serde_json::to_value(url).unwrap();
                 value["attention"] = serde_json::json!("act");
                 overlay
@@ -3735,7 +3726,7 @@ fn reviewing_lane_links_render_and_open_without_focusing() {
             let text = &rows[row.y as usize];
             assert!(before_pin(text).ends_with('!'), "{rows:?}");
             state.hits = hits;
-            if section == TabSection::Reviewing {
+            if section == "needs_you" {
                 let label = if url.is_some() {
                     "review ↗"
                 } else {
@@ -3811,22 +3802,21 @@ fn reviewing_lane_links_render_and_open_without_focusing() {
 
 #[test]
 fn scoping_lane_links_render_and_open_without_focusing() {
-    use crate::factory_overlay::TabSection;
     for grouped in [false, true] {
         for (section, scope_url, review_url) in [
             (
-                TabSection::Scoping,
+                "working",
                 Some("https://studio.tailf266ac.ts.net:8799/scope"),
                 None,
             ),
-            (TabSection::Scoping, None, None),
+            ("working", None, None),
             (
-                TabSection::Implementing,
+                "working",
                 Some("https://studio.tailf266ac.ts.net:8799/scope"),
                 None,
             ),
             (
-                TabSection::Reviewing,
+                "needs_you",
                 Some("https://studio.tailf266ac.ts.net:8799/scope"),
                 Some("https://studio.tailf266ac.ts.net:8799/review"),
             ),
@@ -3848,7 +3838,7 @@ fn scoping_lane_links_render_and_open_without_focusing() {
             }
             for id in ["lane-a", "lane-b"] {
                 let mut value = serde_json::to_value(&overlay.tabs[id]).unwrap();
-                value["section"] = serde_json::to_value(section).unwrap();
+                value["home"] = serde_json::to_value(home(section)).unwrap();
                 value["scope_url"] = serde_json::to_value(scope_url).unwrap();
                 value["review_url"] = serde_json::to_value(review_url).unwrap();
                 value["attention"] = serde_json::json!("act");
@@ -3872,7 +3862,7 @@ fn scoping_lane_links_render_and_open_without_focusing() {
             let text = &rows[row.y as usize];
             assert!(before_pin(text).ends_with('!'), "{rows:?}");
             state.hits = hits;
-            if section == TabSection::Scoping && scope_url.is_some() {
+            if section == "working" && scope_url.is_some() {
                 let label = "scope ↗";
                 assert!(text.contains(label), "grouped={grouped}: {rows:?}");
                 let x = text[..text.find(label).unwrap()].chars().count() as u16;
@@ -3901,14 +3891,14 @@ fn scoping_lane_links_render_and_open_without_focusing() {
                         row.y,
                     );
                 }
-            } else if section == TabSection::Scoping {
+            } else if section == "working" {
                 assert!(
                     !text.contains("scope ↗") && !text.contains("no link"),
                     "{rows:?}"
                 );
             } else {
                 assert!(!text.contains("scope ↗"), "{rows:?}");
-                if section == TabSection::Reviewing {
+                if section == "needs_you" {
                     assert!(text.contains("review ↗"), "{rows:?}");
                 }
             }
@@ -4001,7 +3991,7 @@ fn goal_fixture() -> (ClientShellSnapshot, FactoryOverlay) {
         overlay.tabs.insert(
             id.into(),
             serde_json::from_value(serde_json::json!({
-                "kind": "lane", "goal": goal, "goal_area": area, "section": section
+                "kind": "lane", "goal": goal, "goal_area": area, "home": home(if section == "reviewing" {"needs_you"} else {"working"})
             }))
             .unwrap(),
         );
@@ -4036,8 +4026,8 @@ fn factory_goal_filter_limits_sections_shortcuts_and_clear_restores_rows() {
     assert!(!rows.iter().any(|row| row.contains("lane-b")
         || row.contains("rail-other")
         || row.contains("closer-lane")
-        || row.contains("IMPLEMENTING")
-        || row.contains("SCOPING")
+        || row.contains("WORKING")
+        || row.contains("WORKING")
         || row.contains("closed")
         || row.contains("background")));
     // Services remain outside goal filtering.
@@ -4051,7 +4041,7 @@ fn factory_goal_filter_limits_sections_shortcuts_and_clear_restores_rows() {
     state
         .tree_chrome_mut()
         .factory_section_focus
-        .insert("ws_1".into(), "SCOPING".into());
+        .insert("ws_1".into(), "WORKING".into());
     let (focused, _, _) =
         rendered_factory_rows_at_width(&snapshot, &overlay, state.tree_chrome_mut(), 40);
     assert!(focused.iter().any(|row| row.contains("show all · 2 more")));
@@ -4081,7 +4071,7 @@ fn factory_goal_filter_limits_sections_shortcuts_and_clear_restores_rows() {
         .iter()
         .any(|row| row.contains("goal") && row.contains("All")));
     assert!(rows.iter().any(|row| row.contains("lane-b")));
-    assert!(rows.iter().any(|row| row.contains("IMPLEMENTING")));
+    assert!(rows.iter().any(|row| row.contains("WORKING")));
     assert!(rows.iter().any(|row| row.contains("closed")));
 }
 
@@ -4094,7 +4084,7 @@ fn numbered_shortcuts_skip_goal_filtered_collapsed_and_unfocused_rows() {
     snapshot.tabs.clear();
     overlay.tabs.clear();
     for (id, goal, section) in [
-        ("rails-a", "rails", "scoping"),
+        ("rails-a", "rails", "reviewing"),
         ("recruiter-b", "recruiter", "implementing"),
         ("recruiter-c", "recruiter", "implementing"),
     ] {
@@ -4105,7 +4095,7 @@ fn numbered_shortcuts_skip_goal_filtered_collapsed_and_unfocused_rows() {
         overlay.tabs.insert(
             id.into(),
             serde_json::from_value(serde_json::json!({
-                "kind": "lane", "goal": goal, "section": section
+                "kind": "lane", "goal": goal, "home": home(if section == "reviewing" {"needs_you"} else {"working"})
             }))
             .unwrap(),
         );
@@ -4134,14 +4124,14 @@ fn numbered_shortcuts_skip_goal_filtered_collapsed_and_unfocused_rows() {
     state
         .tree_chrome_mut()
         .factory_sections_collapsed
-        .insert("ws_1:SCOPING".into());
+        .insert("ws_1:NEEDS YOU".into());
     assert_eq!(shortcut(&mut state, 0), ["recruiter-b"]);
     assert_eq!(shortcut(&mut state, 1), ["recruiter-c"]);
     state.tree_chrome_mut().factory_sections_collapsed.clear();
     state
         .tree_chrome_mut()
         .factory_section_focus
-        .insert("ws_1".into(), "IMPLEMENTING".into());
+        .insert("ws_1".into(), "WORKING".into());
     assert_eq!(shortcut(&mut state, 0), ["recruiter-b"]);
     assert_eq!(shortcut(&mut state, 1), ["recruiter-c"]);
 }
@@ -4217,7 +4207,7 @@ fn factory_goal_menu_area_selection_and_preferences_roundtrip() {
                 json["goal"] = serde_json::Value::Null;
                 *tag = serde_json::from_value(json).unwrap();
             } else {
-                tag.section = None;
+                tag.home = None;
             }
         }
         let (rows, _, _) =
@@ -4262,22 +4252,21 @@ fn sidebar_report_fixture_at_height(
 
 #[test]
 fn factory_sidebar_report_covers_shown_collapsed_grouped_and_scoping_tabs() {
-    use crate::factory_overlay::TabSection;
     let (mut snapshot, mut overlay) = grouped_workflow_fixture();
     snapshot.tabs.retain(|tab| !tab.tab_id.starts_with("wf-"));
     for agent in &mut snapshot.agents {
         agent.agent_status = AgentStatus::Idle;
     }
-    overlay.tabs.get_mut("lane-a").unwrap().section = Some(TabSection::Monitoring);
+    overlay.tabs.get_mut("lane-a").unwrap().home = Some(home("working"));
     overlay.tabs.get_mut("lane-a").unwrap().summary = None;
-    overlay.tabs.get_mut("lane-b").unwrap().section = Some(TabSection::Implementing);
+    overlay.tabs.get_mut("lane-b").unwrap().home = Some(home("working"));
     overlay.tabs.get_mut("lane-b").unwrap().runs.clear();
     let template = snapshot.tabs[0].clone();
     for (id, section) in [
-        ("shown", TabSection::Implementing),
-        ("collapsed", TabSection::Reviewing),
-        ("scoping", TabSection::Scoping),
-        ("idle", TabSection::Closed),
+        ("shown", "working"),
+        ("collapsed", "needs_you"),
+        ("scoping", "working"),
+        ("idle", "finished"),
     ] {
         let mut tab = template.clone();
         tab.tab_id = id.into();
@@ -4287,11 +4276,13 @@ fn factory_sidebar_report_covers_shown_collapsed_grouped_and_scoping_tabs() {
             id.into(),
             TabTag {
                 kind: TabKind::Lane,
-                section: Some(section),
+                home: Some(home(section)),
                 ..Default::default()
             },
         );
     }
+    overlay.tabs.get_mut("scoping").unwrap().scope_url =
+        Some("https://example.invalid/scope".into());
     let mut scoping = snapshot.agents[1].clone();
     scoping.tab_id = "scoping".into();
     scoping.pane_id = "scoping-pane".into();
@@ -4299,30 +4290,30 @@ fn factory_sidebar_report_covers_shown_collapsed_grouped_and_scoping_tabs() {
     let mut tree = ClientTreeChrome::default();
     tree.factory_collapsed_lanes.insert("lane-a".into());
     tree.factory_sections_collapsed
-        .insert("ws_1:READY FOR REVIEW".into());
+        .insert("ws_1:NEEDS YOU".into());
     let report = sidebar_report_fixture(&snapshot, &overlay, &tree);
     let workspace = &report["workspaces"][0];
     let tabs = workspace["tabs"].as_array().unwrap();
     assert_eq!(tabs.len(), snapshot.tabs.len());
     for (id, section, shown, hidden, under) in [
-        ("lane-a", "MONITORING", true, None, None),
+        ("lane-a", "WORKING", true, None, None),
         (
             "lane-b",
-            "MONITORING",
+            "WORKING",
             false,
             Some("group_folded"),
             Some("lane-a"),
         ),
-        ("shown", "IMPLEMENTING", true, None, None),
+        ("shown", "WORKING", true, None, None),
         (
             "collapsed",
-            "READY FOR REVIEW",
+            "NEEDS YOU",
             false,
             Some("section_collapsed"),
             None,
         ),
-        ("scoping", "SCOPING", true, None, None),
-        ("idle", "closed", false, Some("closed_folded"), None),
+        ("scoping", "WORKING", true, None, None),
+        ("idle", "finished", false, Some("closed_folded"), None),
     ] {
         let matches = tabs
             .iter()
@@ -4351,8 +4342,7 @@ fn factory_sidebar_report_has_no_unplaced_tagged_tabs_in_sectioned_fixtures() {
     ] {
         for collapsed in [false, true] {
             let mut overlay = overlay.clone();
-            overlay.tabs.get_mut("lane-a").unwrap().section =
-                Some(crate::factory_overlay::TabSection::Implementing);
+            overlay.tabs.get_mut("lane-a").unwrap().home = Some(home("working"));
             let mut tree = ClientTreeChrome::default();
             if collapsed {
                 tree.collapsed_spaces.insert("ws_1".into());
@@ -4446,7 +4436,7 @@ fn factory_sidebar_report_marks_scrolled_rows_offscreen_not_background() {
             id,
             TabTag {
                 kind: TabKind::Lane,
-                section: Some(crate::factory_overlay::TabSection::Implementing),
+                home: Some(home("working")),
                 ..Default::default()
             },
         );
@@ -4464,7 +4454,7 @@ fn factory_sidebar_report_marks_scrolled_rows_offscreen_not_background() {
     assert!(!offscreen.is_empty(), "{report}");
     for tab in offscreen {
         assert_eq!(tab["hidden"], "offscreen", "{report}");
-        assert_eq!(tab["section"], "IMPLEMENTING", "{report}");
+        assert_eq!(tab["section"], "WORKING", "{report}");
         assert_eq!(tab["indent"], 1, "{report}");
         assert!(tab["row"].is_null(), "{report}");
     }

@@ -327,7 +327,7 @@ fn generated_protocol_schema_artifact_is_current() {
 }
 
 #[test]
-fn request_round_trips_for_server_stop() {
+fn request_server_stop() {
     let request = Request {
         id: "req_stop".into(),
         method: Method::ServerStop(EmptyParams::default()),
@@ -340,7 +340,7 @@ fn request_round_trips_for_server_stop() {
 }
 
 #[test]
-fn request_round_trips_for_server_reload_config() {
+fn request_server_reload_config() {
     let request = Request {
         id: "req_reload".into(),
         method: Method::ServerReloadConfig(EmptyParams::default()),
@@ -353,7 +353,7 @@ fn request_round_trips_for_server_reload_config() {
 }
 
 #[test]
-fn request_round_trips_for_server_reload_agent_manifests() {
+fn request_server_reload_agent_manifests() {
     let request = Request {
         id: "req_reload_agent_manifests".into(),
         method: Method::ServerReloadAgentManifests(EmptyParams::default()),
@@ -366,7 +366,7 @@ fn request_round_trips_for_server_reload_agent_manifests() {
 }
 
 #[test]
-fn request_round_trips_for_server_agent_manifests() {
+fn request_server_agent_manifests() {
     let request = Request {
         id: "req_agent_manifests".into(),
         method: Method::ServerAgentManifests(EmptyParams::default()),
@@ -379,7 +379,7 @@ fn request_round_trips_for_server_agent_manifests() {
 }
 
 #[test]
-fn request_round_trips_for_agent_explain() {
+fn request_agent_explain() {
     let request = Request {
         id: "req_agent_explain".into(),
         method: Method::AgentExplain(AgentTarget {
@@ -979,6 +979,7 @@ fn worktree_request_and_response_round_trip() {
                 }),
             },
             tab: TabInfo {
+                home: None,
                 agent_card: None,
                 runs_on: None,
                 hidden: false,
@@ -1425,6 +1426,7 @@ fn create_response_round_trips_with_root_pane() {
         id: "req_2".into(),
         result: ResponseResult::TabCreated {
             tab: TabInfo {
+                home: None,
                 agent_card: None,
                 runs_on: None,
                 hidden: false,

@@ -1,6 +1,6 @@
 //! Placement facts are captured by the row builder and confirmed by the renderer.
 use super::tree::{AgentPanelListEntry as Entry, ClientTreeChrome};
-use crate::factory_overlay::{TabKind, TabSection};
+use crate::factory_overlay::TabKind;
 use serde::Serialize;
 use std::{
     cell::RefCell,
@@ -41,16 +41,6 @@ struct Reports {
 }
 thread_local! { static REPORTS: RefCell<Reports> = RefCell::new(Reports::default()); }
 
-pub(super) fn section_label(section: Option<TabSection>) -> Option<&'static str> {
-    Some(match section? {
-        TabSection::Orchestrator => "ORCHESTRATOR",
-        TabSection::Scoping => "SCOPING",
-        TabSection::Implementing => "IMPLEMENTING",
-        TabSection::Reviewing => "READY FOR REVIEW",
-        TabSection::Monitoring => "MONITORING",
-        TabSection::Closed => "closed",
-    })
-}
 impl WorkspaceReport {
     pub(super) fn new(
         id: &str,

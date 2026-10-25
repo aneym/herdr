@@ -1,4 +1,3 @@
-//! The unified space/tab/agent tree and attention-aware agent cycling.
 //! Ported from `docs/fork/port-0.9/orig/src/ui/sidebar.rs` and
 //! `orig/src/app/actions.rs` onto the client shell.
 
@@ -2210,7 +2209,10 @@ fn bulk_space_fold_scenario(goal_visible: bool) {
         "tab_1".into(),
         crate::factory_overlay::TabTag {
             goal: Some("rails".into()),
-            section: Some(crate::factory_overlay::TabSection::Orchestrator),
+            home: Some(crate::factory_overlay::HomeTag {
+                state: "owner".into(),
+                ..Default::default()
+            }),
             ..Default::default()
         },
     );

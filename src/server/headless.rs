@@ -1,7 +1,3 @@
-//! Headless server mode — runs the herdr event loop without a real terminal.
-//!
-//! The server:
-//! - Does not enter raw mode or read stdin
 //! - Creates and listens on both `herdr.sock` (existing JSON API) and
 //!   `herdr-client.sock` (new binary protocol)
 //! - Initializes AppState and all PTYs from session restore or fresh state
@@ -125,8 +121,6 @@ fn non_empty_body(value: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_owned())
 }
 
-// ---------------------------------------------------------------------------
-// Loop event enum for the headless server event loop
 // ---------------------------------------------------------------------------
 
 /// Events that the headless server event loop can process.
@@ -3430,14 +3424,19 @@ impl HeadlessServer {
         if !self.app.factory_ui.enabled {
             // Drop any stale deadline so a disabled overlay never wakes the loop.
             self.next_factory_overlay_poll = None;
+            if self.app.factory_overlay.is_some() {
+                self.app.set_factory_overlay(None);
+            }
             self.app.set_live_factory_tabs(Default::default());
         } else if self
             .next_factory_overlay_poll
             .is_none_or(|deadline| now >= deadline)
         {
-            self.next_factory_overlay_poll = Some(now + Duration::from_secs(2));
+            self.next_factory_overlay_poll = Some(now + Duration::from_millis(200));
             let path = self.app.factory_ui.overlay_path();
             if self.factory_overlay_poller.poll(path.as_deref()).is_some() {
+                self.app
+                    .set_factory_overlay(self.factory_overlay_poller.current.clone());
                 match crate::protocol::endpoint::factory_overlay_message(
                     &self.client_shell_boot_id,
                     self.factory_overlay_poller.revision,

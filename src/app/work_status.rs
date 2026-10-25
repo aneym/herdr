@@ -98,6 +98,18 @@ pub(crate) fn live_factory_tabs(
 }
 
 impl App {
+    pub(crate) fn set_factory_overlay(&mut self, overlay: Option<std::sync::Arc<FactoryOverlay>>) {
+        self.factory_overlay = overlay;
+        for ws_idx in 0..self.state.workspaces.len() {
+            let workspace = self.workspace_info(ws_idx);
+            self.emit_event(crate::api::schema::EventEnvelope {
+                event: crate::api::schema::EventKind::WorkspaceUpdated,
+                data: crate::api::schema::EventData::WorkspaceUpdated { workspace },
+            });
+        }
+        self.render_dirty.request_generic();
+    }
+
     /// Replace the set of tabs with live factory work. Each workspace holding a
     /// tab that entered or left the set gets a `workspace.updated` event so API
     /// clients refetch, and client shells get a fresh snapshot.

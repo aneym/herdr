@@ -31,6 +31,7 @@ pub fn tab_panel_key(tab_id: &str) -> String {
 #[serde(default)]
 pub struct FactoryOverlay {
     pub version: u32,
+    pub home_rev: u64,
     /// RFC 3339 timestamp from the writer; display only.
     pub generated_at: Option<String>,
     /// Keyed by herdr tab id, e.g. "w5H:t9E".
@@ -112,30 +113,20 @@ impl Attention {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum TabSection {
-    Orchestrator,
-    Scoping,
-    Implementing,
-    Reviewing,
-    Monitoring,
-    Closed,
-}
-
-fn deserialize_section<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<TabSection>, D::Error> {
-    let value = Option::<String>::deserialize(deserializer)?;
-    Ok(match value.as_deref() {
-        Some("orchestrator") => Some(TabSection::Orchestrator),
-        Some("scoping") => Some(TabSection::Scoping),
-        Some("implementing" | "inflight" | "idle") => Some(TabSection::Implementing),
-        Some("reviewing" | "waiting" | "ready" | "ready_for_review") => Some(TabSection::Reviewing),
-        Some("monitoring") => Some(TabSection::Monitoring),
-        Some("closed") => Some(TabSection::Closed),
-        _ => None,
-    })
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(default)]
+pub struct HomeTag {
+    pub entity: String,
+    #[serde(rename = "class")]
+    pub class: String,
+    pub state: String,
+    pub seats: u32,
+    pub stale: bool,
+    pub progress_at: Option<i64>,
+    pub finished_at: Option<i64>,
+    pub sub: String,
+    pub order: i64,
+    pub folded: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -145,8 +136,8 @@ pub struct TabTag {
     pub mode: TabMode,
     pub goal: Option<String>,
     pub goal_area: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_section")]
-    pub section: Option<TabSection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub home: Option<HomeTag>,
     /// Review page for a lane awaiting review.
     pub review_url: Option<String>,
     /// Canonical scoping doc for a lane in scoping.
@@ -357,26 +348,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn stage_sections_accept_current_and_legacy_writer_values() {
-        for (value, expected) in [
-            ("orchestrator", Some(TabSection::Orchestrator)),
-            ("scoping", Some(TabSection::Scoping)),
-            ("implementing", Some(TabSection::Implementing)),
-            ("reviewing", Some(TabSection::Reviewing)),
-            ("ready", Some(TabSection::Reviewing)),
-            ("ready_for_review", Some(TabSection::Reviewing)),
-            ("monitoring", Some(TabSection::Monitoring)),
-            ("closed", Some(TabSection::Closed)),
-            ("inflight", Some(TabSection::Implementing)),
-            ("waiting", Some(TabSection::Reviewing)),
-            ("idle", Some(TabSection::Implementing)),
-            ("bogus", None),
-        ] {
-            let json = format!(
-                r#"{{"version":1,"tabs":{{"lane":{{"kind":"lane","section":"{value}"}}}}}}"#
-            );
-            let overlay = parse(json.as_bytes()).unwrap();
-            assert_eq!(overlay.tabs["lane"].section, expected, "{value}");
+    fn home_tags_round_trip_all_states_and_optional_values() {
+        for state in ["needs_you", "working", "finished"] {
+            for finished_at in [None, Some(1761400000)] {
+                let expected = HomeTag {
+                    entity: "lane:home".into(),
+                    class: "lane".into(),
+                    state: state.into(),
+                    seats: 3,
+                    stale: true,
+                    progress_at: Some(1761400000),
+                    finished_at,
+                    sub: "1 open ask".into(),
+                    order: 3,
+                    folded: finished_at.is_some(),
+                };
+                let json = serde_json::json!({"version":1,"home_rev":3,"tabs":{"lane":{"kind":"lane","home":expected}}});
+                let overlay = parse(&serde_json::to_vec(&json).unwrap()).unwrap();
+                assert_eq!(overlay.home_rev, 3);
+                assert_eq!(overlay.tabs["lane"].home.as_ref(), Some(&expected));
+                let reparsed = parse(&serde_json::to_vec(&overlay).unwrap()).unwrap();
+                assert_eq!(reparsed, overlay);
+            }
         }
     }
 
