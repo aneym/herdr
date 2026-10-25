@@ -5,6 +5,7 @@ export function cycleMachine(names: readonly string[], current: string, directio
   return names[(index + direction + names.length) % names.length];
 }
 import { buildSidebar, statusRank } from "./model";
+import { compareHomeTags } from "./home";
 import type { SidebarRow, Snapshot } from "./model";
 import type { MachineStatus } from "./bridge";
 
@@ -20,15 +21,9 @@ export function splitRemote(id: string): [string, string] | null {
   return slash > 0 ? [id.slice(0, slash), id.slice(slash + 1)] : null;
 }
 const labelKey = (label: string) => label.trim().toLowerCase();
-/** Other machines' chats inside the one tree, as the Mac's MachineMerge: a remote tab shows only
- *  when it runs an agent or holds a pin; it joins the local space with the same label (trimmed, any
- *  case), else a space of its own after the local ones. Agents and pins follow the local blocks, by
- *  machine in input order. Every remote row carries its machine and health for the badge, ids are
- *  namespaced `<machine>/<id>`, and none takes a hotkey. */
 export function mergeMachineRows(local: SidebarRow[], remotes: RemoteMachine[]): SidebarRow[] {
   if (!remotes.length) return local;
-  const agents = local.filter(r => r.kind === "agent" && !r.hidden), hiddenAgents = local.filter(r => r.kind === "agent" && r.hidden);
-  const pins = local.filter(r => r.kind === "pinned");
+  const home = local.filter(r => r.kind === "home");
   const spaces: SidebarRow[][] = [];
   for (const row of local) {
     if (row.kind === "space") spaces.push([row]);
@@ -38,12 +33,10 @@ export function mergeMachineRows(local: SidebarRow[], remotes: RemoteMachine[]):
   for (const block of spaces) if (!byLabel.has(labelKey(block[0].label))) byLabel.set(labelKey(block[0].label), block);
   for (const remote of remotes) {
     const s = remote.snapshot;
-    const shownTab = new Set((s.tabs ?? []).filter(t => t.pin_index != null || s.agents?.some(a => a.tab_id === t.tab_id)).map(t => t.tab_id));
+    const shownTab = new Set((s.tabs ?? []).filter(t => t.pin_index != null || t.role === "agent" || s.agents?.some(a => a.tab_id === t.tab_id)).map(t => t.tab_id));
     const tag = (row: SidebarRow): SidebarRow => ({ ...row, id: `${remote.name}/${row.id}`, hotkey: null, machine: remote.name, machineHealth: remote.health, ...(row.spaceId ? { spaceId: `${remote.name}/${row.spaceId}` } : {}) });
-    const rows = buildSidebar(s).filter(r => r.kind === "space" || shownTab.has(r.id));
-    agents.push(...rows.filter(r => r.kind === "agent" && !r.hidden).map(tag));
-    hiddenAgents.push(...rows.filter(r => r.kind === "agent" && r.hidden).map(tag));
-    pins.push(...rows.filter(r => r.kind === "pinned").map(tag));
+    const rows = buildSidebar(s).filter(r => r.kind === "space" || r.kind === "home" || r.represented || shownTab.has(r.id));
+    home.push(...rows.filter(r => r.kind === "home").map(tag));
     for (const space of rows.filter(r => r.kind === "space")) {
       const tabs = rows.filter(r => r.kind === "tab" && r.section === space.id);
       if (!tabs.length) continue;
@@ -53,11 +46,12 @@ export function mergeMachineRows(local: SidebarRow[], remotes: RemoteMachine[]):
         byLabel.set(labelKey(space.label), block);
         spaces.push(block);
       }
-      const home = block[0];
-      block.push(...tabs.map(t => ({ ...tag(t), section: home.id, spaceId: home.id, spaceLabel: home.label, hidden: home.hidden })));
+      const homeSpace = block[0];
+      block.push(...tabs.map(t => ({ ...tag(t), section: homeSpace.id, spaceId: homeSpace.id, spaceLabel: homeSpace.label, hidden: homeSpace.hidden })));
     }
   }
-  return [...agents, ...hiddenAgents, ...pins, ...spaces.flat()];
+  const sectionRank = (row: SidebarRow) => ["NEEDS YOU", "WORKING", "FINISHED", "UTILITIES"].indexOf(row.section);
+  return [...home.sort((a, b) => sectionRank(a) - sectionRank(b) || compareHomeTags(a.homeTag, b.homeTag)), ...spaces.flat()];
 }
 /** One name per machine, as the Mac's MachineRows.renameHosts: a host footer row that names a
  *  machine in another case ("PC" for "pc") takes the machine's name, only when it is the one machine

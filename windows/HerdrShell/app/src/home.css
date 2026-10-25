@@ -1,0 +1,7 @@
+.status.needs_you { color: var(--shell-attention-act); }
+.status.finished { color: var(--shell-ok); }
+.home-seats { flex-shrink: 0; padding: var(--shell-space-step2) var(--shell-space-step5); border-radius: var(--shell-radius-row); background: var(--shell-cap); color: var(--shell-text); font-size: var(--shell-type-section-label); font-weight: 400; white-space: nowrap; }
+.home-stale { flex-shrink: 0; color: var(--shell-bad); font-weight: 600; }
+.home-class-divider { height: 1px; margin: var(--shell-space-step4) var(--shell-space-step8); background: var(--shell-muted); opacity: 0.45; }
+.home-earlier { font-size: var(--shell-type-row-trailing); font-weight: 400; }
+.home-earlier .chevron { flex-shrink: 0; }

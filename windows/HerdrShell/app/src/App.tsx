@@ -22,8 +22,7 @@ import type { PaneController } from "./PaneTerm";
 import { installPathDrops } from "./dropPaths";
 import { installControl } from "./control";
 import { newPanes } from "./newPanes";
-import { PENDING_LIFETIME_MS, pinMovePlan } from "./pinDrag";
-import type { PendingOrders } from "./pinDrag";
+import { pinMovePlan } from "./pinDrag";
 import type { ControlState } from "./control";
 import type { MutableRefObject } from "react";
 import "@xterm/xterm/css/xterm.css";
@@ -153,7 +152,6 @@ function MachineView({ attentionTrails, machine, machines, snapshot, snapshots, 
   const [pending, setPending] = useState<{ tabId: string; paneId: string } | null>(null);
   const controllers = useRef(new Map<string, PaneController>());
   const revealed = useSelectionReveal(selected);
-  const [pendingPins, setPendingPins] = useState<PendingOrders>({});
   const catalog = useLaneFiles(machine.name, machine.state === "up");
   const overlay = useSpacesOverlay(machine.name, machine.state === "up");
   const studioHosts = machine.name !== "studio" && machines.some(m => m.name === "studio" && m.state === "up");
@@ -161,21 +159,9 @@ function MachineView({ attentionTrails, machine, machines, snapshot, snapshots, 
   const hosts = useMemo(() => renameHosts(overlay.hosts.length ? overlay.hosts : studioHosts ? studioOverlay.hosts : [], machines.map(m => m.name)), [overlay, studioOverlay, studioHosts, machines]);
   const navigation = useSidebarNavigation(snapshot, catalog, selected);
   const navigationRef = useRef(navigation); navigationRef.current = navigation;
-  const rows = useMemo(() => buildSidebar(snapshot, pendingPins, Date.now()), [snapshot, pendingPins]);
+  const rows = useMemo(() => buildSidebar(snapshot), [snapshot]);
   const remotes = useMemo(() => remoteMachines(machines, snapshots, machine.name), [machines, snapshots, machine.name]);
   const selectRemote = useCallback((name: string, tab: string) => { selections.set(name, { selected: tab, focused: null }); chooseMachine(name); }, [selections, chooseMachine]);
-  useEffect(() => {
-    const entries = Object.values(pendingPins);
-    if (!entries.length) return;
-    const shown = buildSidebar(snapshot);
-    const settled = (Object.keys(pendingPins) as (keyof PendingOrders)[]).filter(section => {
-      const entry = pendingPins[section];
-      return !entry || Date.now() - entry.at >= PENDING_LIFETIME_MS || shown.filter(r => r.kind === section).map(r => r.id).join() === entry.order.join();
-    });
-    if (settled.length) { setPendingPins(value => { const next = { ...value }; settled.forEach(section => delete next[section]); return next; }); return; }
-    const timer = setTimeout(() => setPendingPins(value => ({ ...value })), PENDING_LIFETIME_MS - (Date.now() - Math.min(...entries.map(e => e!.at))));
-    return () => clearTimeout(timer);
-  }, [snapshot, pendingPins]);
   const state = useRef({ machine, machines, snapshot, selected, focused, rows });
   state.current = { machine, machines, snapshot, selected, focused, rows };
   const select = useCallback((id: string, stepping = false) => {
@@ -279,12 +265,7 @@ function MachineView({ attentionTrails, machine, machines, snapshot, snapshots, 
   const movePin = useCallback((ids: string[], from: number, to: number) => {
     const plan = pinMovePlan(state.current.snapshot, ids, from, to);
     if (!plan) return;
-    const at = Date.now();
-    setPendingPins(value => ({ ...value, [plan.section]: { order: plan.order, at } }));
-    void bridge.api(state.current.machine.name, "tab.pin_move", { tab_id: plan.tab, pin_index: plan.pinIndex }).catch(error => {
-      setPendingPins(value => { if (value[plan.section]?.at !== at) return value; const next = { ...value }; delete next[plan.section]; return next; });
-      showError(error);
-    });
+    void bridge.api(state.current.machine.name, "tab.pin_move", { tab_id: plan.tab, pin_index: plan.pinIndex }).catch(showError);
   }, [showError]);
   return <div className="layout"><div className={`title-strip ${sidebarVisible ? "over-sidebar" : ""}`}><UpdatePill /></div>{sidebarVisible && <Sidebar thoughts={thoughts} openDetail={detailPanel.toggle} navigation={navigation} paneDropRow={paneDragState?.zone?.kind === "into_tab" ? `tab:${paneDragState.zone.tab_id}` : paneDragState?.zone?.kind === "new_tab_in" ? `space:${paneDragState.zone.workspace_id}` : null} snapshot={snapshot} catalog={catalog} remotes={remotes} selectRemote={selectRemote} overlay={overlay} hosts={hosts} rows={rows} selected={selected} revealed={revealed} machine={machine} notice={notice?.text ?? null} select={select} pin={pin} movePin={movePin} renaming={renaming} startRename={id => { setRenaming(id); }} cancelRename={() => setRenaming(null)} commitRename={async (id, label) => { try { await action("rename_tab", label, id); setRenaming(null); const pane = state.current.focused; if (pane) controllers.current.get(pane)?.focus(); } catch { /* runAction reports through the transient status notice. */ } }} />}{detailPanel.rowId && <DetailPanel snapshot={snapshot} rowId={detailPanel.rowId} openFull={id => { detailPanel.close(); select(id); }} />}{factoryOpen && <FactoryPage machine={machine.name} online={machine.state === "up"} />}<div className="factory-pane-host" hidden={factoryOpen}><TabView onSpring={select} online={machine.state === "up"} registerDrag={registerDrag} onDragChange={setPaneDragState} snapshot={snapshot} selected={selected} machine={machine.name} focused={switcherOpen || renaming ? null : focused} onFocus={focus} shortcut={shortcut} register={register} pin={pin} onError={showError} /></div>{switcherOpen && <Switcher presentation={queryPresentation} query={switcherQuery} changeQuery={setSwitcherQuery} selectQuery={selectQuery} rows={rows} selected={selected} machine={machine.name} open={select} close={closeSwitcher} />}{!sidebarVisible && (notice || machine.state !== "up") && <div className="machine-error notice" role="status">{notice?.text ?? machine.error ?? machine.state}</div>}{settingsOpen && <Settings machine={machine.name} snapshot={snapshot} onError={showError} close={() => { setSettingsOpen(false); const pane = state.current.focused; if (pane) controllers.current.get(pane)?.focus(); }} />}</div>;
 }
