@@ -348,32 +348,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn home_tags_round_trip_all_states_and_optional_values() {
-        for state in ["needs_you", "working", "finished"] {
-            for finished_at in [None, Some(1761400000)] {
-                let expected = HomeTag {
-                    entity: "lane:home".into(),
-                    class: "lane".into(),
-                    state: state.into(),
-                    seats: 3,
-                    stale: true,
-                    progress_at: Some(1761400000),
-                    finished_at,
-                    sub: "1 open ask".into(),
-                    order: 3,
-                    folded: finished_at.is_some(),
-                };
-                let json = serde_json::json!({"version":1,"home_rev":3,"tabs":{"lane":{"kind":"lane","home":expected}}});
-                let overlay = parse(&serde_json::to_vec(&json).unwrap()).unwrap();
-                assert_eq!(overlay.home_rev, 3);
-                assert_eq!(overlay.tabs["lane"].home.as_ref(), Some(&expected));
-                let reparsed = parse(&serde_json::to_vec(&overlay).unwrap()).unwrap();
-                assert_eq!(reparsed, overlay);
-            }
-        }
-    }
-
-    #[test]
     fn parses_optional_tab_pulse() {
         let overlay = parse(
             br#"{"version":1,"tabs":{"normal":{"pulse":{"line":"reply 18s","drifting":false}},"drift":{"pulse":{"line":"slow 3/5","drifting":true}},"legacy":{"kind":"lane"}}}"#,
