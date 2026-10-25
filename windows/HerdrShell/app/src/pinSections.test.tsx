@@ -50,7 +50,7 @@ it("folds a section to a count and remembers the fold", async () => {
 });
 
 it("a pin drag stays inside its section", () => {
-  expect(pinMovePlan(snapshot, ["b", "c"], 1, 0)).toEqual({ tab: "c", pinIndex: 1, order: ["c", "b"], section: "pinned" });
+  expect(pinMovePlan(snapshot, ["b", "c"], 1, 0)).toEqual({ tab: "c", pinIndex: 1 });
   expect(pinMovePlan(snapshot, ["a", "b"], 1, 0)).toBeNull();
   expect(document.querySelector('[data-row="pinned:b"]')?.getAttribute("data-pin-section")).toBe("pinned|Needs you");
 });

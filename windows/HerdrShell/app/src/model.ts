@@ -1,4 +1,3 @@
-import type { PendingOrders } from "./pinDrag";
 import type { Face } from "./faces";
 import { compareHomeTags, homeSection, homeTooltip, representedTabIds } from "./home";
 export interface Workspace { workspace_id: string; number: number; sort_rank?: number; parked?: boolean; label?: string; focused?: boolean; active_tab_id?: string; work_status?: string; agent_status?: string; tokens?: { pinned?: string; hidden?: string } }
@@ -22,7 +21,7 @@ export interface Snapshot { pin_sections?: string[]; automations?: AutomationSum
 export interface SidebarRow { kind: "agent" | "pinned" | "home" | "space" | "tab"; id: string; label: string; status: string; hotkey: number | null; section: string; depth?: number; spaceLabel?: string; spaceId?: string; hidden?: boolean; parked?: boolean; pinned?: boolean; face?: Face; request?: string; home?: Tab["home_location"]; runsOn?: string; machine?: string; machineHealth?: string | null; doc?: TabDoc; homeTag?: HomeTag; represented?: boolean; hostBadge?: string; homeDetail?: string }
 export const tabStatus = (snapshot: Snapshot, tab: Tab): string => tab.work_status ?? snapshot.agents?.find(agent => agent.tab_id === tab.tab_id)?.agent_status ?? tab.agent_status ?? "unknown";
 export const statusRank = (status: string) => ({ blocked: 3, working: 2, done: 1 }[status] ?? 0);
-export function buildSidebar(snapshot: Snapshot, _pending: PendingOrders = {}, now = Date.now()): SidebarRow[] {
+export function buildSidebar(snapshot: Snapshot, now = Date.now()): SidebarRow[] {
   const tabs = snapshot.tabs ?? [];
   const tags = snapshot.overlay?.tabs ?? {};
   const represented = representedTabIds(snapshot);

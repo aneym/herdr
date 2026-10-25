@@ -31,7 +31,7 @@ describe("agent faces", () => {
         { pane_id: "p3", terminal_id: "c", workspace_id: "w1", tab_id: "w1:t3", tokens: { request: "ar-2" } },
       ],
     };
-    const rows = buildSidebar(snapshot, {}, 0);
+    const rows = buildSidebar(snapshot, 0);
     const byId = (kind: string, id: string) => rows.find(r => r.kind === kind && r.id === id)!;
     expect(byId("agent", "w1:t1")).toMatchObject({ face: { initial: "F", tint: 6, avatar: "https://example.com/f.png" }, request: "ar-1" });
     expect(byId("agent", "w1:t2").face).toEqual({ initial: "C", tint: 2 });
