@@ -72,8 +72,6 @@ pub struct SessionSnapshot {
     pub desks: std::collections::HashMap<String, crate::app::state::TabDocState>,
     #[serde(default)]
     pub pinned_tabs: Vec<crate::app::state::PinnedTab>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pin_sections: Vec<String>,
     #[serde(default)]
     pub tree_show_hidden_spaces: bool,
     #[serde(default)]
@@ -410,8 +408,6 @@ struct RawSessionSnapshot {
     #[serde(default)]
     pinned_tabs: Vec<crate::app::state::PinnedTab>,
     #[serde(default)]
-    pin_sections: Vec<String>,
-    #[serde(default)]
     tree_show_hidden_spaces: bool,
     #[serde(default)]
     hidden_spaces_expanded: bool,
@@ -444,7 +440,6 @@ fn migrate_snapshot(raw: RawSessionSnapshot) -> Result<SessionSnapshot, String> 
         tree_pinned_spaces: raw.tree_pinned_spaces,
         desks: raw.desks,
         pinned_tabs: raw.pinned_tabs,
-        pin_sections: raw.pin_sections,
         tree_show_hidden_spaces: raw.tree_show_hidden_spaces,
         hidden_spaces_expanded: raw.hidden_spaces_expanded,
         hidden_agents_expanded: raw.hidden_agents_expanded,
@@ -522,7 +517,6 @@ pub struct UiPrefs {
     pub tree_pinned_spaces: std::collections::HashSet<String>,
     pub docs: std::collections::HashMap<String, crate::app::state::TabDocState>,
     pub pinned_tabs: Vec<crate::app::state::PinnedTab>,
-    pub pin_sections: Vec<String>,
     pub tree_show_hidden_spaces: bool,
     pub hidden_spaces_expanded: bool,
     pub hidden_agents_expanded: bool,
@@ -541,7 +535,6 @@ impl Default for UiPrefs {
             tree_pinned_spaces: Default::default(),
             docs: Default::default(),
             pinned_tabs: Vec::new(),
-            pin_sections: Vec::new(),
             tree_show_hidden_spaces: false,
             hidden_spaces_expanded: false,
             hidden_agents_expanded: false,
@@ -586,7 +579,6 @@ pub fn capture(
         tree_pinned_spaces: ui.tree_pinned_spaces,
         desks: ui.docs,
         pinned_tabs: ui.pinned_tabs,
-        pin_sections: ui.pin_sections,
         tree_show_hidden_spaces: ui.tree_show_hidden_spaces,
         hidden_spaces_expanded: ui.hidden_spaces_expanded,
         hidden_agents_expanded: ui.hidden_agents_expanded,
@@ -1107,7 +1099,6 @@ mod tests {
             tree_pinned_spaces: std::collections::HashSet::new(),
             desks: Default::default(),
             pinned_tabs: Vec::new(),
-            pin_sections: Vec::new(),
             tree_show_hidden_spaces: false,
             hidden_spaces_expanded: false,
             hidden_agents_expanded: false,
@@ -1265,7 +1256,6 @@ mod tests {
             tree_pinned_spaces: std::collections::HashSet::new(),
             desks: Default::default(),
             pinned_tabs: Vec::new(),
-            pin_sections: Vec::new(),
             tree_show_hidden_spaces: false,
             hidden_spaces_expanded: false,
             hidden_agents_expanded: false,
@@ -1352,7 +1342,6 @@ mod tests {
             tree_pinned_spaces: std::collections::HashSet::new(),
             desks: Default::default(),
             pinned_tabs: Vec::new(),
-            pin_sections: Vec::new(),
             tree_show_hidden_spaces: false,
             hidden_spaces_expanded: false,
             hidden_agents_expanded: false,
@@ -2317,7 +2306,6 @@ mod tests {
             tree_pinned_spaces: std::collections::HashSet::new(),
             desks: Default::default(),
             pinned_tabs: Vec::new(),
-            pin_sections: Vec::new(),
             tree_show_hidden_spaces: false,
             hidden_spaces_expanded: false,
             hidden_agents_expanded: false,

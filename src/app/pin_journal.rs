@@ -8,7 +8,6 @@ use super::App;
 impl App {
     pub(super) fn journal_pin_change(&self, op: &str, source: Option<&str>, tab_id: &str) {
         let pin_index = self.state.pinned_tab_index(tab_id);
-        let section = pin_index.and_then(|index| self.state.pinned_tabs[index].section.as_deref());
         let label = self
             .parse_tab_id(tab_id)
             .and_then(|(ws, tab)| self.tab_info(ws, tab))
@@ -19,7 +18,6 @@ impl App {
             json!({
                 "tab_id": tab_id,
                 "label": label,
-                "section": section,
                 "pin_index": pin_index,
             }),
         );
@@ -39,7 +37,7 @@ impl App {
             event["at"] = json!(at);
             event["op"] = json!(op);
             event["source"] = json!(source.unwrap_or("ui"));
-            for key in ["tab_id", "label", "section", "pin_index"] {
+            for key in ["tab_id", "label", "pin_index"] {
                 if event.get(key).is_none() {
                     event[key] = Value::Null;
                 }

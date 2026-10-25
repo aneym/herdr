@@ -251,18 +251,6 @@ impl App {
         let Some(tab_id) = self.public_tab_id(ws_idx, tab_idx) else {
             return tab_not_found(id, &params.tab_id);
         };
-        if params.pinned
-            && params
-                .section
-                .as_deref()
-                .is_some_and(|name| !self.state.pin_sections.iter().any(|s| s == name.trim()))
-        {
-            return encode_error(
-                id,
-                "pin_section_not_found",
-                "no pinned section has that name",
-            );
-        }
         let before = self.state.pinned_tabs.clone();
         if params.pinned {
             let priority = params.priority.unwrap_or_else(|| {
@@ -275,12 +263,6 @@ impl App {
             });
             if params.priority.is_some() || !self.state.is_tab_pinned(&tab_id) {
                 self.state.pin_tab(tab_id.clone(), priority);
-            }
-            if let Some(section) = params.section.as_deref() {
-                if let Err(error) = self.state.set_pin_section(&tab_id, Some(section)) {
-                    self.state.pinned_tabs = before;
-                    return encode_error(id, error.code(), error.message());
-                }
             }
         } else {
             self.state.unpin_tab(&tab_id);
@@ -686,7 +668,6 @@ mod tests {
                             tab_id: ids.get(i).cloned().unwrap_or_else(|| "missing:t1".into()),
                             priority: 0,
                             role: agent.then_some(TabRole::Agent),
-                            section: None,
                         })
                         .collect();
                     app.state.switch_workspace_tab(closing, 0);
@@ -999,7 +980,6 @@ mod tests {
                 tab_id: tab_id.to_string(),
                 pinned,
                 priority,
-                section: None,
             },
         );
         assert!(
@@ -1165,7 +1145,6 @@ mod tests {
                     tab_id: tab_id.to_string(),
                     pinned: true,
                     priority,
-                    section: None,
                 },
             );
             let success: SuccessResponse = serde_json::from_str(&response).unwrap();
@@ -1187,7 +1166,6 @@ mod tests {
                 tab_id: cross_space.clone(),
                 pinned: false,
                 priority: None,
-                section: None,
             },
         );
         let success: SuccessResponse = serde_json::from_str(&response).unwrap();

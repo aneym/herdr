@@ -142,18 +142,6 @@ pub enum Method {
     TabSetHidden(TabSetHiddenParams),
     #[serde(rename = "tab.pin_move")]
     TabPinMove(TabPinMoveParams),
-    #[serde(rename = "tab.set_pin_section")]
-    TabSetPinSection(TabSetPinSectionParams),
-    #[serde(rename = "pin_section.list")]
-    PinSectionList(EmptyParams),
-    #[serde(rename = "pin_section.create")]
-    PinSectionCreate(PinSectionCreateParams),
-    #[serde(rename = "pin_section.rename")]
-    PinSectionRename(PinSectionRenameParams),
-    #[serde(rename = "pin_section.delete")]
-    PinSectionDelete(PinSectionTarget),
-    #[serde(rename = "pin_section.move")]
-    PinSectionMove(PinSectionMoveParams),
     #[serde(rename = "tab.close")]
     TabClose(TabTarget),
     #[serde(rename = "agents.list")]

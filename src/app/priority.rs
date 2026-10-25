@@ -192,7 +192,6 @@ impl super::AppState {
                 .copied()
                 .unwrap_or(self.sidebar_priority.order.len() as u32)
         });
-        self.normalize_pin_sections();
     }
 
     /// A renamed plain pin joins the end of its new group, preserving peer order.
