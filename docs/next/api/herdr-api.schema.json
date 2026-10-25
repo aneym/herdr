@@ -806,6 +806,62 @@
           ],
           "type": "string"
         },
+        "HomeTag": {
+          "properties": {
+            "class": {
+              "default": "",
+              "type": "string"
+            },
+            "entity": {
+              "default": "",
+              "type": "string"
+            },
+            "finished_at": {
+              "default": null,
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "folded": {
+              "default": false,
+              "type": "boolean"
+            },
+            "order": {
+              "default": 0,
+              "format": "int64",
+              "type": "integer"
+            },
+            "progress_at": {
+              "default": null,
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "seats": {
+              "default": 0,
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "stale": {
+              "default": false,
+              "type": "boolean"
+            },
+            "state": {
+              "default": "",
+              "type": "string"
+            },
+            "sub": {
+              "default": "",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
         "PaneInfo": {
           "properties": {
             "agent": {
@@ -1168,6 +1224,16 @@
             },
             "hidden": {
               "type": "boolean"
+            },
+            "home": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/event/$defs/HomeTag"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "home_location": {
               "anyOf": [
@@ -9234,6 +9300,62 @@
           ],
           "type": "string"
         },
+        "HomeTag": {
+          "properties": {
+            "class": {
+              "default": "",
+              "type": "string"
+            },
+            "entity": {
+              "default": "",
+              "type": "string"
+            },
+            "finished_at": {
+              "default": null,
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "folded": {
+              "default": false,
+              "type": "boolean"
+            },
+            "order": {
+              "default": 0,
+              "format": "int64",
+              "type": "integer"
+            },
+            "progress_at": {
+              "default": null,
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "seats": {
+              "default": 0,
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "stale": {
+              "default": false,
+              "type": "boolean"
+            },
+            "state": {
+              "default": "",
+              "type": "string"
+            },
+            "sub": {
+              "default": "",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
         "InstalledPluginInfo": {
           "properties": {
             "actions": {
@@ -13097,6 +13219,16 @@
             },
             "hidden": {
               "type": "boolean"
+            },
+            "home": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/HomeTag"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "home_location": {
               "anyOf": [

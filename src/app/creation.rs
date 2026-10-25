@@ -284,6 +284,12 @@ impl App {
         let tab_id = self.public_tab_id(ws_idx, tab_idx)?;
         let agent_key = self.agent_home_key(ws_idx, tab_idx, &tab_id);
         Some(crate::api::schema::TabInfo {
+            home: self
+                .factory_overlay
+                .as_ref()
+                .and_then(|overlay| overlay.tab(&tab_id))
+                .and_then(|tag| tag.home.clone())
+                .map(Box::new),
             home_location: agent_key
                 .as_ref()
                 .and_then(|key| self.state.agent_homes.get(key).copied()),
@@ -553,9 +559,6 @@ fn terminal_agent_session_info(
 }
 
 impl App {
-    /// Re-resolves where each chat runs (`runs_on.rs`): panes the move runner adopted onto
-    /// the box, agent panes whose foreground job is ssh, and this machine's name. Only
-    /// agent tabs are probed for ssh, so the scheduled poll stays a handful of process
     /// lookups. True when anything changed.
     pub(crate) fn set_agent_homes(
         &mut self,

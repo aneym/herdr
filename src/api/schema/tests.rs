@@ -979,6 +979,7 @@ fn worktree_request_and_response_round_trip() {
                 }),
             },
             tab: TabInfo {
+                home: None,
                 agent_card: None,
                 runs_on: None,
                 hidden: false,
@@ -1425,6 +1426,7 @@ fn create_response_round_trips_with_root_pane() {
         id: "req_2".into(),
         result: ResponseResult::TabCreated {
             tab: TabInfo {
+                home: None,
                 agent_card: None,
                 runs_on: None,
                 hidden: false,

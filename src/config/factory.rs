@@ -29,7 +29,11 @@ impl FactoryUiConfig {
     /// The overlay file path with a leading `~/` expanded, or None when polling is off.
     #[allow(dead_code)] // Read by the server poll piece.
     pub fn overlay_path(&self) -> Option<std::path::PathBuf> {
-        let raw = self.overlay_file.trim();
+        let override_path = std::env::var("HERDR_OVERLAY").ok();
+        let raw = override_path
+            .as_deref()
+            .unwrap_or(&self.overlay_file)
+            .trim();
         if raw.is_empty() {
             return None;
         }

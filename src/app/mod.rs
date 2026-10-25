@@ -1,8 +1,3 @@
-//! Application orchestration.
-//!
-//! - `state.rs` — AppState, Mode, and pure data structs
-//! - `actions.rs` — state mutations (testable without PTYs/async)
-
 pub(crate) mod actions;
 mod agent_resume;
 pub(crate) use agent_resume::AgentRestartAfterShutdown;
@@ -125,6 +120,7 @@ pub struct App {
     pub(crate) polite_send_settle: Duration,
     pub(crate) agent_restart: crate::config::AgentRestartConfig,
     pub(crate) factory_ui: crate::config::FactoryUiConfig,
+    pub(crate) factory_overlay: Option<std::sync::Arc<crate::factory_overlay::FactoryOverlay>>,
     /// Tabs whose factory run is live by a fresh overlay; see `work_status`.
     pub(crate) live_factory_tabs: std::collections::HashSet<String>,
     pub(crate) pixel_mouse_available: bool,
@@ -700,6 +696,7 @@ impl App {
             polite_send_settle: Duration::from_millis(config.server.polite_send_submit_settle_ms),
             agent_restart: config.agent_restart.clone(),
             factory_ui: config.ui.factory.clone(),
+            factory_overlay: None,
             live_factory_tabs: Default::default(),
             usage_sampler: usage::UsageSampler::default(),
             config_diagnostic_deadline: None,

@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use tracing::warn;
 
@@ -51,29 +51,15 @@ impl FactoryOverlayPoller {
             modified,
             len: metadata.len(),
         };
-        // A writer can replace a file twice inside the filesystem's mtime resolution.
-        let recent = modified.is_none_or(|time| {
-            SystemTime::now()
-                .duration_since(time)
-                .is_ok_and(|age| age <= Duration::from_secs(2))
-        });
         let areas_path = path.with_file_name("areas.json");
         let areas_stamp = fs::metadata(&areas_path).ok().map(|metadata| FileStamp {
             path: areas_path.clone(),
             modified: metadata.modified().ok(),
             len: metadata.len(),
         });
-        let areas_recent = areas_stamp
-            .as_ref()
-            .and_then(|stamp| stamp.modified)
-            .is_some_and(|time| {
-                SystemTime::now()
-                    .duration_since(time)
-                    .is_ok_and(|age| age <= Duration::from_secs(2))
-            });
         let stamp_changed =
             self.last_seen.as_ref() != Some(&stamp) || self.last_areas != areas_stamp;
-        if !stamp_changed && !recent && !areas_recent {
+        if !stamp_changed {
             return None;
         }
         let bytes = match fs::read(path) {
@@ -155,6 +141,7 @@ impl FactoryOverlayPoller {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn factory_overlay_poller_publishes_only_valid_changes_and_removal() {
