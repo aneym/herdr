@@ -11,8 +11,18 @@ func log(_ s: String) {}
         print("areas " + ShellPaths.areas)
         fflush(stdout)
         let catalog = LaneCatalog()
+        catalog.start()
         while readLine() != nil {
-            catalog.reload()
+            var published = false
+            catalog.reload { published = true }
+            let deadline = ProcessInfo.processInfo.systemUptime + 5
+            while !published, ProcessInfo.processInfo.systemUptime < deadline {
+                RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+            }
+            guard published else {
+                FileHandle.standardError.write(Data("Timed out waiting for lane reload publication\n".utf8))
+                exit(1)
+            }
             let groups = catalog.snapshot.spaceGroups.map { $0.map { $0.name + "=" + $0.spaces.joined(separator: ",") }.joined(separator: ";") }
             print("groups " + (groups ?? "nil"))
             fflush(stdout)

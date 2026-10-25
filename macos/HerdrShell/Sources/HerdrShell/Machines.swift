@@ -1,14 +1,5 @@
 import Foundation
 
-/// Other machines' herdr servers, whose chats join the local spaces tree (MachineMerge).
-///
-/// Each machine is a pair of sockets that `herdr-machine-tunnels` keeps forwarded
-/// (`~/.config/herdr-machines/<name>/herdr.sock` and `herdr-client.sock`). The shell
-/// never touches herdr's own endpoint catalog; local rows draw as they do with no machines,
-/// and a remote chat adds only its own row and badge.
-///
-/// Remote ids carry the machine name: `ax42/w1:t2`, `ax42/term_65cc…`. Local ids never
-/// contain `/`, so one string says which server owns a tab, pane or terminal.
 enum Machines {
     struct Config: Equatable {
         let name: String
@@ -16,7 +7,6 @@ enum Machines {
         let clientSocket: String
     }
 
-    /// Read once at startup, before main.swift clears HERDR_*.
     private(set) static var configs: [Config] = []
 
     static func configure(env: [String: String]) {
@@ -29,7 +19,6 @@ enum Machines {
         configs = list.compactMap { m in
             guard let name = m["name"] as? String, !name.isEmpty, !name.contains("/"), !name.contains(":"),
                   m["enabled"] as? Bool != false else { return nil }
-            // One name, one server: ids carry only the name, so a duplicate would misroute commands.
             guard seen.insert(name).inserted else { log("machines: duplicate \(name) ignored"); return nil }
             let dir = ((m["dir"] as? String) ?? root + "/" + name) as NSString
             let socket = (m["socket"] as? String).map { ($0 as NSString).expandingTildeInPath }
@@ -43,7 +32,6 @@ enum Machines {
 
     static func prefix(_ name: String) -> String { name + "/" }
 
-    /// `ax42/w1:t2` -> ("ax42", "w1:t2"); a local id -> nil.
     static func split(_ id: String) -> (machine: String, raw: String)? {
         guard let slash = id.firstIndex(of: "/"), slash != id.startIndex else { return nil }
         return (String(id[..<slash]), String(id[id.index(after: slash)...]))
@@ -56,20 +44,16 @@ enum Machines {
         return configs.first { $0.name == name }
     }
 
-    /// What `herdr terminal attach` needs to reach a remote terminal: its raw id and sockets.
     static func attachTarget(_ terminalId: String) -> (raw: String, env: [String: String])? {
         guard let (_, raw) = split(terminalId), let c = config(for: terminalId) else { return nil }
         return (raw, ["HERDR_SOCKET_PATH": c.socket, "HERDR_CLIENT_SOCKET_PATH": c.clientSocket])
     }
 
-    /// Keys whose string values are herdr ids, wherever they appear in a snapshot.
     static let idKeys: Set<String> = [
         "workspace_id", "tab_id", "pane_id", "terminal_id", "active_tab_id",
         "focused_workspace_id", "focused_tab_id", "focused_pane_id", "parent_pane_id",
     ]
 
-    /// Puts the machine name on every id in a `session.snapshot` reply and tags each
-    /// agent with `host`, so the rest of the shell can hold remote rows next to local ones.
     static func namespace(_ data: Data, machine: String) -> Data {
         guard let obj = try? JSONSerialization.jsonObject(with: data) else { return data }
         let p = prefix(machine)
@@ -92,30 +76,23 @@ enum Machines {
     }
 }
 
-/// One remote machine's live state, as the sidebar shows it.
 struct MachineState: Identifiable, Equatable {
     var id: String { name }
     let name: String
-    /// Namespaced snapshot; nil until the first one arrives.
     var snapshot: Snapshot?
-    /// nil while connected; otherwise why not.
     var problem: String?
     var downSince: Date?
 
     static func == (a: MachineState, b: MachineState) -> Bool {
         a.name == b.name && a.problem == b.problem && a.downSince == b.downSince && a.epoch == b.epoch
     }
-    /// Bumped on every applied snapshot, so equality notices new state without comparing it.
     var epoch = 0
 }
 
-/// Other machines as MachineMerge input: their spaces and tabs, ids already namespaced, and
-/// each machine's health for its badge. No machine has rows of its own.
 enum MachineRows {
     static func inputs(_ machines: [MachineState], localProtocol: Int? = nil) -> [MachineMerge.Machine] {
         machines.compactMap { m in
             guard let s = m.snapshot else { return nil }
-            // Only a known protocol on both sides is a mismatch; an unknown one says nothing.
             let mismatch = localProtocol.flatMap { local in s.protocol.map { $0 != local } } ?? false
             let health = m.problem != nil ? "unreachable" : mismatch ? "needs update" : nil
             return MachineMerge.Machine(name: m.name, health: health, spaces: s.workspaces.map {
@@ -132,15 +109,11 @@ enum MachineRows {
                                                  explicitParent: group?.placement == "under" ? explicitTab : nil,
                                                  handsOn: group?.placement == "hands_on")
                     }, status: tab.agent_status ?? "unknown", pinIndex: tab.pin_index, work: tab.work_status, role: tab.role, sortRank: tab.sort_rank ?? 0,
-request: s.panes.filter { $0.tab_id == tab.tab_id }.compactMap { $0.tokens?["request"] }.first, hidden: tab.hidden ?? false, homeLocation: tab.home_location, runsOn: tab.runs_on, pinSection: tab.pin_section, agentName: tab.agent_card?.name, avatar: tab.agent_card?.avatar_url)
-            }, pinSections: s.pin_sections)
+request: s.panes.filter { $0.tab_id == tab.tab_id }.compactMap { $0.tokens?["request"] }.first, hidden: tab.hidden ?? false, homeLocation: tab.home_location, runsOn: tab.runs_on, home: tab.home, agentName: tab.agent_card?.name, avatar: tab.agent_card?.avatar_url)
+            })
         }
     }
 
-    /// One name per machine: a host footer row that names a machine in another case
-    /// ("PC" for "pc") takes the machine's name, so the two blocks agree. Machines are keyed by
-    /// their exact name: a row that names one exactly keeps it, and a case-only match renames
-    /// only when it is the one machine and the one row of that spelling, so `pc` and `PC` stay two.
     static func renameHosts(_ rows: [SpacesRow], machines: [String]) -> [SpacesRow] {
         func folds(_ a: String, _ b: String) -> Bool { a.caseInsensitiveCompare(b) == .orderedSame }
         let hosts = rows.filter { $0.kind == .footerHost }.map(\.title)

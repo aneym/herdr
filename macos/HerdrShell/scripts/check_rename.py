@@ -77,7 +77,7 @@ def main():
     build = pathlib.Path.home() / ".cache/herdr-build/rename-check"
     build.mkdir(parents=True, exist_ok=True)
     driver = build / "dump"
-    subprocess.run(["swiftc", "-parse-as-library", *(str(SRC / f) for f in ("Snapshot.swift", "SpacesTree.swift", "DeskModel.swift")),
+    subprocess.run(["swiftc", "-parse-as-library", *(str(SRC / f) for f in ("Snapshot.swift", "SpacesModels.swift", "HomeRows.swift", "SpacesTree.swift", "SpaceScope.swift", "Automations.swift")),
                     str(ROOT / "scripts/rename_dump.swift"), "-o", str(driver)], check=True)
 
     subprocess.run([sys.executable, str(ROOT / "scripts/lab.py"), "down"], capture_output=True)

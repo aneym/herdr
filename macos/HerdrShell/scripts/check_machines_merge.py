@@ -16,7 +16,7 @@ FIXTURE = ROOT / "scripts/fixtures/machines/merge.json"
 _scratch = tempfile.TemporaryDirectory(prefix="herdr-machines-merge-")
 BUILD = pathlib.Path(_scratch.name)
 DRIVER = BUILD / "machines_merge_dump"
-subprocess.run(["swiftc", str(ROOT / "Sources/HerdrShell/SpacesTree.swift"), str(ROOT / "Sources/HerdrShell/MachineMerge.swift"),
+subprocess.run(["swiftc", *(str(ROOT / "Sources/HerdrShell" / name) for name in ("SpacesModels.swift", "HomeRows.swift", "SpacesTree.swift", "SpaceScope.swift", "Automations.swift")), str(ROOT / "Sources/HerdrShell/MachineMerge.swift"),
                 str(ROOT / "scripts/machines_merge_dump.swift"), "-o", str(DRIVER)], check=True)
 rows = subprocess.check_output([str(DRIVER), str(FIXTURE)], text=True).splitlines()
 local = subprocess.check_output([str(DRIVER), str(FIXTURE), "--local"], text=True).splitlines()
@@ -64,10 +64,6 @@ check("unmatched remote space sits in its areas group after the local member",
       f"group {group} rails {at('space:s1')} recruiting {own} poker {at('space:s2')}")
 check("chatless remote tabs and spaces show nothing",
       not any(x in r for r in rows for x in ("ax42/w1:t2", "ax42/w3", "forge")))
-pins = [r.split("|")[1] for r in rows if r.startswith("tab|pinned:")]
-check("remote pins follow local pins", pins == ["pinned:s1:t1", "pinned:ax42/w1:t1"], str(pins))
-pinned = fields("pinned:ax42/w1:t1")
-check("remote pinned row keeps the space label and gets the badge", pinned is not None and pinned[7] == "rails" and pinned[-1] == "@ax42", str(pinned))
 pc = fields("tab:pc/w1:t1")
 check("unreachable machine's chat sits in its space with a dimmed badge state",
       "tab:pc/w1:t1" in block("s2") and pc is not None and pc[-1] == "@pc:unreachable", str(pc))

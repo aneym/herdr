@@ -14,7 +14,6 @@ struct SpacesRowView: View {
     /// Section focus toggle ("◎" or "✕"); nil when the section has none.
     var focusMark: String? = nil
     var pinned = false
-    /// The pointer is over this row. Pinned-section rows show their unpin toggle only then.
     var hovered = false
     var showResume = false
     var doc: TabDoc? = nil
@@ -25,7 +24,6 @@ struct SpacesRowView: View {
     var resume: () -> Void = {}
 
     static let chevronWidth: CGFloat = 9
-    /// One slot for a state glyph or an agent face, so AGENTS and PINNED titles line up.
     static let glyphWidth: CGFloat = ShellFace.size
     static let alertWidth: CGFloat = 7
     /// Hit width of a trailing pin, + or chevron.
@@ -37,13 +35,13 @@ struct SpacesRowView: View {
     static let titleMinWidth: CGFloat = 96
 
     private var isFooter: Bool { row.kind == .footerUsage || row.kind == .footerHost }
-    /// Tab, section and Hidden-agent header rows hold the leading chevron slot, so their
-    /// labels share one column. The Hidden header keeps its actual chevron trailing.
-    /// Runs never open; their indent already nests them.
-    private var treeRow: Bool { row.kind == .tab || row.kind == .automation || row.kind == .section || row.id == "hiddenagents" }
-    private var agentRow: Bool { row.id.hasPrefix("agent:") || row.id.hasPrefix("hiddenagent:") }
+    private var treeRow: Bool { row.kind == .tab || row.kind == .automation || row.kind == .section }
 
     var body: some View {
+        if row.kind == .divider {
+            Rectangle().fill(t.mute).frame(height: 1)
+                .padding(.horizontal, ShellSpace.sidebarRowInset)
+        } else {
         HStack(spacing: ShellSpace.sidebarRowGap) {
             if row.chevron != "none", row.kind != .space, row.kind != .hidden {
                 chevron.frame(maxHeight: .infinity).contentShape(Rectangle())
@@ -75,8 +73,17 @@ struct SpacesRowView: View {
                 Circle().fill(t.accent).frame(width: ShellFace.dot, height: ShellFace.dot)
                     .help("request \(request)")
             }
-            if !agentRow, let machine = row.badge { badge(machine) }
+            if let machine = row.badge { badge(machine) }
             Spacer(minLength: 4)
+            if row.seats > 0 {
+                Text("\(row.seats) seats")
+                    .font(.system(size: ShellType.sectionLabel))
+                    .foregroundStyle(t.ink)
+                    .padding(.horizontal, ShellSpace.step4)
+                    .padding(.vertical, ShellSpace.step2)
+                    .background(RoundedRectangle(cornerRadius: ShellRadius.row).fill(t.cap))
+                    .fixedSize()
+            }
             if row.kind == .goal { collapseSpaces }
             if !row.trailing.isEmpty, row.kind != .goal {
                 trailingText.font(.system(size: ShellType.sectionLabel)).monospacedDigit().foregroundStyle(trailingTone)
@@ -85,24 +92,12 @@ struct SpacesRowView: View {
                     .layoutPriority(1)
                     .onTapGesture { click(row.link == nil ? "body" : "link") }
             }
-            if agentRow, let place = row.place {
-                Text(place).font(.system(size: ShellType.sectionLabel)).foregroundStyle(t.mute)
-                    .lineLimit(1).fixedSize()
-                    .help("Runs on " + place).accessibilityLabel("Runs on " + place)
-            }
             if let home = row.home, let glyph = homeGlyph(home) {
                 Text(glyph).font(.system(size: ShellType.rowTrailing))
                     .foregroundStyle(home == "unsynced" ? t.warn : t.mute)
                     .help(homeLabel(home)).accessibilityLabel(homeLabel(home))
             }
-            // Agent machine badges follow the home glyph (spec line 98).
-            if agentRow, let machine = row.badge { badge(machine) }
-            if row.id == "hiddenagents" {
-                if row.alert == "act" {
-                    Circle().fill(t.accent).frame(width: ShellFace.dot, height: ShellFace.dot)
-                        .accessibilityLabel("Hidden agent needs attention")
-                }
-            } else if row.kind != .goal, !isFooter, row.kind != .title {
+            if row.kind != .goal, !isFooter, row.kind != .title {
                 Text(row.alert == "none" ? "" : "!").fontWeight(.bold)
                     .foregroundStyle(row.alert == "act" ? t.bad : t.warn)
                     .frame(width: Self.alertWidth)
@@ -111,10 +106,6 @@ struct SpacesRowView: View {
             }
             if showResume {
                 Button("Resume") { resume() }.buttonStyle(.plain).foregroundStyle(t.accent).fixedSize()
-            }
-            if row.id == "pinned" {
-                // A new chat pinned at the end of this section (HerdrModel.newPinnedTab).
-                Text("+").foregroundStyle(t.mute).fixedSize().onTapGesture { click("plus") }.clickTarget("pinned+")
             }
             if row.kind == .section {
                 Text(focusMark ?? "").font(.system(size: ShellType.glyph)).foregroundStyle(t.mute)
@@ -145,6 +136,8 @@ struct SpacesRowView: View {
         .frame(height: ShellSpace.rowHeight)
         .padding(.leading, indent).padding(.horizontal, ShellSpace.sidebarRowInset)
         .background(RoundedRectangle(cornerRadius: ShellRadius.row).fill(selected && row.kind == .tab ? t.sel : .clear))
+        .accessibilityLabel([row.title, row.hover].compactMap { $0 }.joined(separator: ", "))
+        }
     }
 
     private func homeGlyph(_ home: String) -> String? {
@@ -221,7 +214,11 @@ struct SpacesRowView: View {
     }
 
     /// Status color, as Ghostty: working green, blocked red, done peach, idle and unknown mute.
-    private var tone: Color { Color(hex: t.stateTone(row.tone)) }
+    private var tone: Color {
+        if row.homeState == "needs_you" { return t.attentionAct }
+        if row.homeState == "finished" { return t.ok }
+        return Color(hex: t.stateTone(row.tone))
+    }
 
     /// Leading inset: sections sit under the space name, rows under the section label.
     private var indent: CGFloat {

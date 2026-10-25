@@ -93,9 +93,7 @@ final class TestHook {
                 // As the sidebar: a tab row's pin is a server fact, a space row's a local preference.
                 if row.kind == .tab, let tab = row.tab { c.model.togglePin(tab) } else { c.state.spacesChrome.toggle("pin:" + String(row.id.dropFirst(6))) }
             }
-            else if part == "plus", row.id == "pinned" {
-                c.model.newPinnedTab(focused: c.state.selectedTab, done: c.selectWhenListed)
-            } else if part == "plus" {
+            else if part == "plus" {
                 let commands = c.commands
                 let space = String(row.id.dropFirst(6))
                 DispatchQueue.global(qos: .userInitiated).async {
@@ -127,8 +125,6 @@ final class TestHook {
             case "reduce": drag.reduceOverride = obj["on"] as? Bool
             default: break
             }
-        case "drag_pin":
-            dragPin(obj)
         case "set_hidden":
             guard let c = controller else { return }
             let row = (obj["row"] as? String).flatMap { id in c.model.spacesRows(state: c.state).first { $0.id == id }?.tab }
@@ -139,16 +135,6 @@ final class TestHook {
             let row = (obj["row"] as? String).flatMap { id in c.model.spacesRows(state: c.state).first { $0.id == id }?.tab }
             guard let tab = obj["tab"] as? String ?? obj["tab_id"] as? String ?? row else { return }
             c.model.setAgentRole(tab, obj["role"] as? String == "agent")
-        case "pin_move":
-            // {"cmd":"pin_move","row":"pinned:<tab>","to":slot}: what a drop on that slot does.
-            guard let c = controller, let id = obj["row"] as? String, let to = obj["to"] as? Int else { return }
-            let rows = c.model.spacesRows(state: c.state)
-            guard let section = PinDrag.section(of: id), let row = rows.first(where: { $0.id == id }), let tab = row.tab else { return }
-            let machine = PinDrag.machine(of: tab)
-            let ids = rows.filter { PinDrag.section(of: $0.id) == section && PinDrag.machine(of: $0.tab ?? "") == machine }.compactMap(\.tab)
-            if let from = ids.firstIndex(of: tab) {
-                PinDrag.shared.commit(model: c.model, ids: ids, from: from, to: to)
-            }
         case "new_tab":
             controller?.newTab(nil)
         case "panel_shot":
@@ -578,62 +564,6 @@ final class TestHook {
         }
     }
 
-    private func dragPin(_ obj: [String: Any]) {
-        guard let c = controller, let id = obj["row"] as? String, let frame = c.state.rowFrames[id], !dragRunning else {
-            log("hook: drag_pin: no row \(obj["row"] ?? "?")"); return
-        }
-        let view = c.sidebarHostView
-        let safe = view.safeAreaRect
-        let topInset = view.isFlipped ? safe.minY : view.bounds.height - safe.maxY
-        // As the click hook: SwiftUI's frame is top-left origin inside the safe area.
-        func point(_ dy: CGFloat) -> NSPoint {
-            let yFromTop = topInset + frame.midY + dy
-            let local = NSPoint(x: safe.minX + frame.midX, y: view.isFlipped ? yFromTop : view.bounds.height - yFromTop)
-            return view.convert(local, to: nil)
-        }
-        let dy = CGFloat(obj["dy"] as? Double ?? Double(obj["dy"] as? Int ?? 0))
-        let steps = max(1, obj["steps"] as? Int ?? 8)
-        let interval = obj["interval"] as? Double ?? 0.05
-        let esc = obj["esc"] as? Bool ?? false
-        var n = 0
-        func post(_ type: NSEvent.EventType, _ p: NSPoint) {
-            n += 1
-            guard let ev = NSEvent.mouseEvent(with: type, location: p, modifierFlags: [],
-                                              timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: c.window.windowNumber,
-                                              context: nil, eventNumber: n, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1) else { return }
-            NSApp.sendEvent(ev)
-        }
-        dragRunning = true
-        delivered.append("drag_pin \(id) dy=\(dy) esc=\(esc) via NSApp.sendEvent")
-        post(.mouseMoved, point(0))
-        post(.leftMouseDown, point(0))
-        var i = 0
-        dragTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] t in
-            i += 1
-            if i <= steps {
-                post(.leftMouseDragged, point(dy * CGFloat(i) / CGFloat(steps)))
-            } else if esc && i == steps + 1 {
-                // Queued, not sent, so the app's key monitors see it as a typed Esc.
-                if let key = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
-                                              timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: c.window.windowNumber,
-                                              context: nil, characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}",
-                                              isARepeat: false, keyCode: 53) {
-                    NSApp.postEvent(key, atStart: false)
-                }
-            } else {
-                post(.leftMouseUp, point(dy))
-                t.invalidate()
-                self?.dragRunning = false
-            }
-        }
-        // The typed Esc can leave the run loop in a tracking mode; a default-mode timer would
-        // then never post the release and every later drag_pin is refused as still running.
-        if let dragTimer { RunLoop.main.add(dragTimer, forMode: .common) }
-    }
-
-    /// {"cmd":"scroll","pane":id,"dy":lines}: a wheel event with line deltas
-    /// (positive dy = wheel up, i.e. towards older output), built as a CGEvent
-    /// and sent to the surface under the window's own event path.
     private func scroll(_ obj: [String: Any]) {
         guard let c = controller,
               let s = c.currentPanes.first(where: { $0.paneId == obj["pane"] as? String }),
@@ -1041,7 +971,6 @@ final class TestHook {
             "numbered_tabs": Array(c.model.numberedTabIds(state: c.state).prefix(9)),
             "hidden_agents": ([c.model.snapshot].compactMap { $0 } + c.model.machines.compactMap(\.snapshot)).flatMap(\.tabs).filter { $0.role == "agent" && ($0.hidden ?? false) }.map(\.tab_id),
             "agent_tabs": c.model.numberedTabIds(state: c.state).filter { c.model.isAgent($0) },
-            "pin_drag": ["dragged": PinDrag.shared.dragged as Any? ?? NSNull(), "target": PinDrag.shared.target as Any? ?? NSNull()] as [String: Any],
             // Each tab row's context menu items, as a right-click shows them.
             "spaces_menus": Dictionary(c.model.spacesRows(state: c.state).filter { $0.tab != nil }
                 .map { ($0.id, RowMenu.items(for: $0, model: c.model).map(\.rawValue)) }, uniquingKeysWith: { a, _ in a }),

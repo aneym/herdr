@@ -45,5 +45,5 @@ func green(_ c: UInt32) -> Bool { let r = (c >> 16) & 0xFF, g = (c >> 8) & 0xFF,
 }
 ''')
     driver = build / "state_colors"
-    subprocess.run(["swiftc", "-parse-as-library", str(SRC / "Theme.swift"), str(SRC / "GhosttyConfigMerge.swift"), str(SRC / "ShellTokens.swift"), str(SRC / "SpacesTree.swift"), str(source), "-o", str(driver)], check=True, timeout=240)
+    subprocess.run(["swiftc", "-parse-as-library", str(SRC / "Theme.swift"), str(SRC / "GhosttyConfigMerge.swift"), str(SRC / "ShellTokens.swift"), *(str(SRC / name) for name in ("SpacesModels.swift", "HomeRows.swift", "SpacesTree.swift", "SpaceScope.swift", "Automations.swift")), str(source), "-o", str(driver)], check=True, timeout=240)
     subprocess.run([str(driver)], check=True, timeout=60)

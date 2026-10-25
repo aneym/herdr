@@ -1,4 +1,8 @@
-title|agents|0|none||mute|agents||none||||
+section|home-section:needs_you|0|none||mute|NEEDS YOU|0|none||||
+section|home-section:working|0|none||mute|WORKING|0|none||||
+section|home-section:finished|0|none||mute|FINISHED|0|none||||
+section|home-section:utility|0|none||mute|UTILITIES|0|none||||
+title|spaces|0|none||mute|Spaces||none||||
 space|space:ws|0|open||mute|factory||none||orch|space:ws|
 section|section:ws:ORCHESTRATOR|1|open||mute|ORCHESTRATOR||none|||section:ws:ORCHESTRATOR|
 tab|tab:orch|1|none|●|idle|orchestrator||none||orch||

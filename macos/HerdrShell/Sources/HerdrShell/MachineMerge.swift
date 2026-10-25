@@ -18,7 +18,6 @@ enum MachineMerge {
         var health: String?
         var spaces: [SpacesInput.Space]
         var tabs: [SpacesInput.Tab]
-        var pinSections: [String]? = nil
     }
 
     static func key(_ label: String) -> String { label.trimmingCharacters(in: .whitespaces).lowercased() }
@@ -28,7 +27,6 @@ enum MachineMerge {
         var byLabel: [String: String] = [:]
         for space in local.spaces where byLabel[key(space.name)] == nil { byLabel[key(space.name)] = space.id }
         for machine in machines {
-            for name in machine.pinSections ?? [] where !(out.pinSections ?? []).contains(name) { out.pinSections = (out.pinSections ?? []) + [name] }
             let shown = machine.tabs.filter { !$0.agents.isEmpty || $0.pinIndex != nil }
             for var tab in shown {
                 guard let space = machine.spaces.first(where: { $0.id == tab.space }) else { continue }

@@ -50,8 +50,8 @@
   },
   "chrome": {
     "focusedSection": {
-      "ws": "SCOPING",
-      "two": "IMPLEMENTING"
+      "ws": "LANES",
+      "two": "LANES"
     }
   },
   "now": 1000

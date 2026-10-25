@@ -11,41 +11,23 @@ final class SidebarState: ObservableObject {
         if let data = try? JSONEncoder().encode(spacesChrome) { Self.store.set(data, forKey: "herdr.shell.spacesChrome"); sync() }
     }
     @Published var selectedTab: String?
-    /// Fold state the user set by hand, by fold id (`tab:<id>`, `hidden`, `background`).
-    /// A fold with no entry follows SidebarModel: closed, unless a row inside asks or failed.
     @Published var manualOpen: [String: Bool] = [:]
     @Published var focusedPane: String?
-    /// Row whose details are open in the detail panel (P11).
     @Published var detailRow: String?
-    /// Draw the rows without a ScrollView: only the in-process screenshot fallback sets it,
-    /// because AppKit view caching does not draw a ScrollView's content.
     @Published var flat = false
-    /// Where each row was last drawn (view-local, top-left origin), by line id. Read by the test
-    /// hook, which turns it into a real mouse click, and by a pin drag for its slots; not
-    /// observed, so it never redraws.
     var rowFrames: [String: CGRect] = [:]
-    /// Transient client-only insertion cue for a pane dragged into a tab or space.
     @Published var paneDropRow: String?
 
-    /// Areas is the default once a lanes or areas file is present. Without one, the sidebar
-    /// stays the spaces list (P10). A saved choice wins over that default.
     @Published var mode: SidebarMode
     @Published var chip: AreaChip
     @Published var areaOnly: String?
     @Published var foldedAreas: Set<String>
     @Published var focusExpanded: Bool
-    /// 1-based index into the Focus ranking while ⌘] / ⌘[ is stepping. Nil otherwise.
     @Published var focusCursor: Int?
-    /// The sidebar column. Hidden, the pane host takes that width.
     @Published var sidebarVisible: Bool
-    /// Factory view fills the pane host while this is true.
     @Published var factoryOpen = false
-    /// Set by the test hook for the duration of a synthetic option-click. A real option
-    /// click is read from the current event.
     var clickOption = false
 
-    /// Dev keeps a suite per lab under the dev prefix. Prod uses the bundle domain.
-    /// `UserDefaults.standard` in the real home would let two labs reopen each other.
     static let store: UserDefaults = Channel.store
     private static let prefix = "herdr.shell."
 
@@ -115,7 +97,6 @@ final class SidebarState: ObservableObject {
     }
 }
 
-/// Frames of clickable things, keyed by name, reported up from the SwiftUI views (P11 check clicks).
 struct ClickTargetKey: PreferenceKey {
     static var defaultValue: [String: CGRect] = [:]
     static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
@@ -123,8 +104,6 @@ struct ClickTargetKey: PreferenceKey {
     }
 }
 
-/// The button action a check invokes by target and id. SwiftUI only takes real mouse
-/// clicks in the active app, so `--agent-run` calls these instead of posting a click.
 final class ClickRegistry {
     static let shared = ClickRegistry()
     private var actions: [String: () -> Void] = [:]
@@ -137,14 +116,12 @@ final class ClickRegistry {
 }
 
 extension View {
-    /// Reports this view's frame in the named "click" space under `id`.
     func clickTarget(_ id: String) -> some View {
         background(GeometryReader { g in
             Color.clear.preference(key: ClickTargetKey.self, value: [id: g.frame(in: .named("click"))])
         })
     }
 
-    /// Registers `action` under `key` on every refresh, the same closure the control runs.
     func hookAction(_ key: String, _ action: @escaping () -> Void) -> some View {
         ClickRegistry.shared.set(key, action)
         return self
@@ -155,23 +132,17 @@ struct SidebarView: View {
     @ObservedObject var model: HerdrModel
     @ObservedObject var state: SidebarState
     @ObservedObject var theme: ThemeStore
-    /// Click on an orchestrator or lane row (P11): opens its details and leaves the current tab alone.
-    /// nil means every row selects its tab.
     var openDetail: ((TabRow) -> Void)? = nil
     var select: (String) -> Void
-    /// Selects a tab just created, once a snapshot lists it.
     var selectNew: (String) -> Void = { _ in }
     var onFactory: () -> Void = {}
     var onThoughts: () -> Void = {}
     var onRename: (String) -> Void = { _ in }
 
-    /// Tabs whose Resume is running, so a second click does nothing and the button says so.
     @State private var resuming: Set<String> = []
     @State private var approved: Set<String> = []
     @State private var hoveredSpaceRow: String?
-    @ObservedObject private var pinDrag = PinDrag.shared
 
-    /// Tokens for the effective mode; the view re-renders when the store changes.
     private var t: Tokens { theme.sidebarTokens }
 
     var body: some View {
@@ -188,8 +159,6 @@ struct SidebarView: View {
         }
         .font(.system(size: ShellType.rowTitle))
         .foregroundStyle(t.ink)
-        // Glass on the sidebar puts a panel-colored scrim over the blur layer under the
-        // view, so text keeps its contrast whatever the desktop behind is.
         .background(theme.glass.sidebar ? t.panel.opacity(ChromePalette.glassScrimAlpha) : t.panel)
         .coordinateSpace(name: "click")
         .onReceive(NotificationCenter.default.publisher(for: .remoteActionFinished)) { _ in
@@ -211,7 +180,6 @@ struct SidebarView: View {
         .padding(.top, ShellSpace.step10)
     }
 
-    /// What the sidebar draws, from SidebarModel (the state dump reads the same lines).
     private var lines: [SidebarLine] {
         if state.mode == .spaces {
             return SidebarModel.build(snapshot: model.snapshot, orchestrators: model.orchestrators, lanes: model.lanes,
@@ -256,7 +224,7 @@ struct SidebarView: View {
         return SpacesRowView(
             row: row, t: t, firstSpaceId: firstSpaceId,
             selected: row.tab == state.selectedTab,
-            focusMark: row.kind == .section && row.toggleKey != nil && row.pinGroup == nil && !row.id.hasPrefix("pinsection:") ? (state.spacesChrome.focusedSection[focusSpace] == row.title ? "✕" : "◎") : nil,
+            focusMark: row.kind == .section && row.toggleKey != nil && !row.id.hasPrefix("home-") ? (state.spacesChrome.focusedSection[focusSpace] == row.title ? "✕" : "◎") : nil,
             pinned: row.kind == .tab ? model.isPinned(row.tab ?? "") : row.kind == .space && state.spacesChrome.pinnedSpaces.contains(String(row.id.dropFirst(6))),
             hovered: hoveredSpaceRow == row.id,
             showResume: hoveredSpaceRow == row.id && row.kind == .tab && row.tab.map { model.spacesOverlay.tabs[$0]?.mode == "parked" } == true,
@@ -280,14 +248,16 @@ struct SidebarView: View {
                         case .pin, .unpin: spacesClick(row, part: "pin")
                         case .addAgent: model.setAgentRole(tab, true)
                         case .removeAgent: model.setAgentRole(tab, false)
-                        case .hide: model.setAgentHidden(tab, true)
-                        case .show: model.setAgentHidden(tab, false)
                         }
                     }
                 }
             }
         }
-        .pinDraggable(row, rows: all, frames: { state.rowFrames }, drag: pinDrag, model: model, t: t, paneDropTarget: state.paneDropRow == row.id)
+        .overlay {
+            if state.paneDropRow == row.id {
+                PaneDropFill(row: row.id, tokens: t).allowsHitTesting(false)
+            }
+        }
         .clickTarget(row.id)
     }
 
@@ -312,13 +282,10 @@ struct SidebarView: View {
     }
 
     private func spacesClick(_ row: SpacesRow, part: String) {
-        if part == "plus", row.id == "pinned" {
-            model.newPinnedTab(focused: state.selectedTab, done: selectNew)
-        } else if part == "plus" {
+        if part == "plus" {
             let id = String(row.id.dropFirst(6))
             let commands = HerdrCommands(socketPath: model.env["HERDR_SOCKET_PATH"] ?? "")
             DispatchQueue.global(qos: .userInitiated).async {
-                // Selected once a snapshot lists it: another machine's tab can arrive after the reply.
                 if let made = commands.tabCreate(workspaceId: id, cwd: nil) { DispatchQueue.main.async { selectNew(made.tabId) } }
             }
         } else if part == "doc" {
@@ -397,7 +364,6 @@ struct SidebarView: View {
             (.all, "All"), (.scoping, "Scope"), (.building, "Build"), (.review, "Review"), (.use, "Use"),
             (.parked, parkedCount > 0 ? "Parked \(parkedCount)" : "Parked"),
         ]
-        // Six chips share the sidebar width: one line each, tighter gaps, never a wrapped "Parked N".
         return HStack(spacing: ShellSpace.step4) {
             ForEach(chips, id: \.0.rawValue) { chip, title in
                 Text(title)
@@ -453,7 +419,6 @@ struct SidebarView: View {
         .clickTarget("chip:needs")
     }
 
-    /// The foot group: a hairline above, then "Parked N", shut until opened.
     private func parkedHeader(_ l: SidebarLine) -> some View {
         VStack(spacing: 0) {
             Rectangle().fill(t.line).frame(height: 1).padding(.top, ShellSpace.step10).padding(.bottom, ShellSpace.step6)
@@ -471,7 +436,6 @@ struct SidebarView: View {
         }
     }
 
-    /// A parked row: name, then when and why on a second line; Resume on the right.
     private func parkedRow(_ l: SidebarLine) -> some View {
         HStack(alignment: .center, spacing: ShellSpace.step6) {
             if !l.glyph.isEmpty { Text(l.glyph).foregroundStyle(t.mute) }
@@ -567,7 +531,6 @@ struct SidebarView: View {
         .padding(.bottom, ShellSpace.step4)
     }
 
-    /// The mock's one-line summary under a collapsed group.
     private func note(_ l: SidebarLine) -> some View {
         Text(l.title).lineLimit(1).truncationMode(.tail)
             .font(.system(size: ShellType.switcherMeta))
@@ -756,25 +719,20 @@ extension Color {
     }
 }
 
-/// A spaces row's context menu, in order. The sidebar draws it and TestHook's state reads it, so a
-/// check sees the items a right-click shows.
 enum RowMenu: String {
-    case rename = "Rename…", info = "Show info", resume = "Resume", park = "Park…", approve = "Approve scope…", pin = "Pin", unpin = "Unpin", addAgent = "Add to Agents", removeAgent = "Remove from Agents", hide = "Hide", show = "Show in Agents"
+    case rename = "Rename…", info = "Show info", resume = "Resume", park = "Park…", approve = "Approve scope…", pin = "Pin", unpin = "Unpin", addAgent = "Add to Agents", removeAgent = "Remove from Agents"
 
     static func items(for row: SpacesRow, model: HerdrModel) -> [RowMenu] {
         guard let tab = row.tab else { return [] }
         var out: [RowMenu] = []
-        // Park, rename and info act on the local server; another machine's tab has none of them yet.
         if !Machines.isRemote(tab) {
             out += [.rename, .info]
             out.append(row.id.contains(":parked") || model.spacesOverlay.tabs[tab]?.mode == "parked" ? .resume : .park)
             if RemoteActions.slug(model.catalog.snapshot.lanes[tab]?.scopeURL) != nil { out.append(.approve) }
         }
-        // A pin is a fact on the server that owns the tab, so another machine's tab pins there.
         if row.kind == .tab {
             out.append(model.isPinned(tab) ? .unpin : .pin)
             out.append(model.isAgent(tab) ? .removeAgent : .addAgent)
-            if let hidden = row.setsHidden { out.append(hidden ? .hide : .show) }
         }
         return out
     }

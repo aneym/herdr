@@ -8,7 +8,7 @@ import tempfile
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 with tempfile.TemporaryDirectory(prefix="herdr-tab-pulse-") as scratch:
     driver = pathlib.Path(scratch) / "dump"
-    subprocess.run(["swiftc", str(ROOT / "Sources/HerdrShell/SpacesTree.swift"),
+    subprocess.run(["swiftc", *(str(ROOT / "Sources/HerdrShell" / name) for name in ("SpacesModels.swift", "HomeRows.swift", "SpacesTree.swift", "SpaceScope.swift", "Automations.swift")),
                     str(ROOT / "scripts/p33_dump.swift"), "-o", str(driver)], check=True)
     fixture = json.loads((ROOT / "scripts/fixtures/p33/base.json").read_text())
     path = pathlib.Path(scratch) / "fixture.json"
