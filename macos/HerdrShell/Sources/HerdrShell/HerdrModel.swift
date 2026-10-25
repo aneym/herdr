@@ -15,7 +15,6 @@ struct TabRow: Identifiable, Equatable {
 final class HerdrModel: ObservableObject {
     let thoughts = ThoughtsModel()
     @Published private(set) var spacesOverlay = Overlay()
-    private let overlayMonitor = FileChangeMonitor()
     @Published private(set) var snapshot: Snapshot?
     @Published private(set) var orchestrators: [TabRow] = []
     @Published private(set) var lanes: [TabRow] = []
@@ -72,20 +71,6 @@ final class HerdrModel: ObservableObject {
             self?.objectWillChange.send()
         }.store(in: &bag)
         catalog.start()
-        let home = TerminalTheme.realHome()
-        let raw = ProcessInfo.processInfo.environment["FACTORY_OVERLAY"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let path = raw.isEmpty ? home + "/.agent-rails/herdr/overlay.json" : (raw as NSString).expandingTildeInPath
-        var previous: Data?
-        overlayMonitor.start(paths: { [path] }) { [weak self] in
-            let overlay = (try? Data(contentsOf: URL(fileURLWithPath: path)))
-                .flatMap { try? JSONDecoder().decode(Overlay.self, from: $0) } ?? Overlay()
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = .sortedKeys
-            let encoded = try? encoder.encode(overlay)
-            guard encoded != previous else { return }
-            previous = encoded
-            DispatchQueue.main.async { [weak self] in self?.spacesOverlay = overlay }
-        }
         catalog.objectWillChange.receive(on: RunLoop.main).sink { [weak self] _ in
             self?.objectWillChange.send()
         }.store(in: &bag)
@@ -102,6 +87,7 @@ final class HerdrModel: ObservableObject {
     private func apply(_ s: Snapshot) {
         localEpoch += 1
         snapshot = s
+        spacesOverlay = s.overlay ?? Overlay()
         let c = TabClassifier(s)
         var orch: [TabRow] = [], lane: [TabRow] = [], wf: [TabRow] = []
         var ownedBy: [String: [TabRow]] = [:]   // owner tab_id -> workflow rows

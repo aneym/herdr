@@ -52,6 +52,7 @@ struct Snapshot: Decodable {
     let panes: [Pane]
     let agents: [Agent]
     var pending_agent_restores: Int? = nil
+    var overlay: Overlay? = nil
     var automations: [AutomationSummary]? = nil
     let layouts: [Layout]
     let version: String?
