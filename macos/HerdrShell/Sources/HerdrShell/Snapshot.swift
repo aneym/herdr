@@ -26,6 +26,14 @@ struct Snapshot: Decodable {
         struct Group: Decodable {
             struct Parent: Decodable { var pane_id: String? = nil }
             var placement: String? = nil; var parent: Parent? = nil; var orphaned = false; var collapsed = false
+            enum CodingKeys: String, CodingKey { case placement, parent, orphaned, collapsed }
+            init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                placement = try c.decodeIfPresent(String.self, forKey: .placement)
+                parent = try c.decodeIfPresent(Parent.self, forKey: .parent)
+                orphaned = try c.decodeIfPresent(Bool.self, forKey: .orphaned) ?? false
+                collapsed = try c.decodeIfPresent(Bool.self, forKey: .collapsed) ?? false
+            }
         }
         let pane_id: String; let tab_id: String; let agent: String?; let agent_status: String?; var work_status: String? = nil
         let tokens: [String: String]?; let ownership: Ownership?; var group: Group? = nil
