@@ -52,6 +52,7 @@ def remote(cmd, input_data=None, stream=False, timeout=None):
         input=input_data,
         capture_output=True,
         text=isinstance(input_data, str) or input_data is None,
+        errors="replace",
         timeout=timeout,
     )
     out = p.stdout if isinstance(p.stdout, str) else (p.stdout or b"").decode("utf-8", "replace")
