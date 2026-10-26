@@ -1,4 +1,5 @@
 import { flushSync } from "react-dom";
+import { observeHomePresentation } from "./homeVisibility";
 import { handleDropPaths } from "./dropPaths";
 import type { DropPaths } from "./dropPaths";
 import { showUpdateError } from "./UpdatePill";
@@ -13,7 +14,8 @@ import type { PaneDrag } from "./paneDrag";
 export interface ControlState { paneDrag?: PaneDrag | null; machine: MachineStatus; machines: MachineStatus[]; chooseMachine: (name: string) => MachineStatus; selected: string | null; rows: SidebarRow[]; panes: PaneController[]; focused: PaneController | undefined; openDetail?: (id?: string, paneId?: string) => void; open: (id: string) => void; action: (name: string) => Promise<void> }
 export function installControl(get: () => ControlState): () => void {
   let disposed = false;
-  const listeners: (() => void)[] = [];
+  const presentation = observeHomePresentation();
+  const listeners: (() => void)[] = [presentation.stop];
   const watch = <T,>(cmd: string, fn: (payload: T) => Promise<unknown>, read = false, reply: boolean | ((payload: T) => boolean) = true) => {
     void bridge.controlEvent<T>(cmd, payload => {
       const respond = typeof reply === "function" ? reply(payload) : reply;
@@ -38,7 +40,7 @@ export function installControl(get: () => ControlState): () => void {
     }
     return bridge.updateStatus();
   });
-  watch("ui", async () => { const state = get(); return { ok: true, machine: state.machine, machines: state.machines.map(({ name, state }) => ({ name, state })), pane_drag: state.paneDrag?.state ?? null, selected_tab: state.selected, appearance: { override: appTheme().override, mode: appTheme().mode }, rows: state.rows.map(({ kind, id, label, status, hotkey }) => ({ kind, id, label, status, hotkey })), panes: state.panes.map(p => p.info()) }; });
+  watch("ui", async () => { const state = get(); return { ok: true, presentation: presentation.samples, observed_at_epoch_ms: performance.timeOrigin + performance.now(), machine: state.machine, machines: state.machines.map(({ name, state }) => ({ name, state })), pane_drag: state.paneDrag?.state ?? null, selected_tab: state.selected, appearance: { override: appTheme().override, mode: appTheme().mode }, rows: state.rows.map(({ kind, id, label, status, hotkey }) => ({ kind, id, label, status, hotkey })), panes: state.panes.map(p => p.info()) }; });
   watch<{ name: string }>("machine", async payload => { return { ok: true, machine: get().chooseMachine(payload.name) }; });
   watch<{ tab_id: string }>("open", async payload => { get().open(payload.tab_id); return { ok: true }; });
   watch<{ row_id?: string; pane_id?: string }>("open_detail", async payload => {

@@ -14,7 +14,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         mpsc, Arc, Mutex,
     },
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 use tauri::{AppHandle, Emitter};
 
@@ -567,18 +567,10 @@ fn stream_snapshots(
     manager.change(app, &config.name, "up", None, Some(endpoints.clone()))?;
     let mut refresh = Instant::now();
     let mut pending = None;
-    let mut applied = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(manager.logs.join(format!("snapshot-{}.log", config.name)))
-        .ok();
-    let mut last = Value::Null;
     loop {
         health()?;
         if Instant::now() >= refresh || pending.is_some_and(|t| Instant::now() >= t) {
-            let started = Instant::now();
             let snapshot = fetch(&endpoints.0)?;
-            let fetch_ms = started.elapsed().as_millis();
             let next_panes = pane_set(&snapshot);
             if panes != next_panes {
                 let next = Subscription::open(&endpoints.0, &next_panes)?;
@@ -593,18 +585,6 @@ fn stream_snapshots(
                 json!({"machine":config.name,"snapshot":snapshot}),
             )
             .map_err(|e| e.to_string())?;
-            if snapshot != last {
-                if let Some(log) = applied.as_mut() {
-                    let at = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .map_or(0, |d| d.as_millis());
-                    let _ = std::io::Write::write_all(
-                        log,
-                        format!("{at} applied pid={} fetch_ms={fetch_ms}\n", std::process::id()).as_bytes(),
-                    );
-                }
-                last = snapshot;
-            }
             refresh = Instant::now() + Duration::from_secs(10);
         }
         match subscription
