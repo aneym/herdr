@@ -27,6 +27,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'gamecheck.ps1')
+. (Join-Path $PSScriptRoot 'webview.ps1')
 
 $InstallDir = [IO.Path]::GetFullPath($InstallDir)
 $OutDir = [IO.Path]::GetFullPath($OutDir)
@@ -64,6 +65,7 @@ function Stop-App {
         if ([DateTime]::UtcNow -ge $deadline) { throw "$ExeName did not stop within 10 s" }
         Start-Sleep -Milliseconds 100
     }
+    Stop-OrphanWebView | Out-Null
 }
 # Launch only when no game runs; returns $true when the app stayed up $UpSeconds.
 function Start-App {

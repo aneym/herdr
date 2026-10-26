@@ -22,7 +22,8 @@ while (Get-Process HerdrShell -ErrorAction SilentlyContinue | Where-Object { -no
     }
     Start-Sleep -Milliseconds 100
 }
-Write-Output "stopped: $($running.Count)"
+. (Join-Path $PSScriptRoot 'webview.ps1')
+Write-Output "stopped: $($running.Count) webview: $(Stop-OrphanWebView)"
 Write-Output "installing $inst"
 # A blocked or failed installer (Smart App Control refused one on 2026-10-06) must not leave
 # Alex without the app: start the copy that was running before.

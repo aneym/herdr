@@ -231,11 +231,11 @@ fn main() {
             } else if background {
                 window = window.focused(false);
             }
-            window.build()?;
             app.manage(bridge::Attaches::default());
             app.manage(files::Files::default());
             app.manage(machines::Machines::start(app.handle().clone())?);
             control::start(app.handle().clone(), test_window);
+            window.build()?;
             Ok(())
         })
         .run(tauri::generate_context!())
