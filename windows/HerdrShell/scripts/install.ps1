@@ -10,12 +10,12 @@ if ($Sha) {
         Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
 }
 if (!$inst -or !(Test-Path $inst)) { Write-Error "installer not found ($inst)"; exit 1 }
-$running = @(Get-Process HerdrShell -ErrorAction SilentlyContinue)
+$running = @(Get-Process HerdrShell -ErrorAction SilentlyContinue | Where-Object { -not $_.HasExited })
 # Read the path while the process lives; an exited process no longer reports it.
 $wasRunning = @($running | ForEach-Object { $_.Path } | Where-Object { $_ })
 $running | Stop-Process -Force -ErrorAction SilentlyContinue
 $deadline = [DateTime]::UtcNow.AddSeconds(10)
-while (Get-Process HerdrShell -ErrorAction SilentlyContinue) {
+while (Get-Process HerdrShell -ErrorAction SilentlyContinue | Where-Object { -not $_.HasExited }) {
     if ([DateTime]::UtcNow -ge $deadline) {
         Write-Error 'HerdrShell did not stop within 10 s'
         exit 1
