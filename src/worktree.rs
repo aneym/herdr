@@ -318,7 +318,52 @@ pub(crate) fn run_worktree_add_command(
     } else {
         build_worktree_add_new_branch_command(repo_root, path, branch, base, trust_repository)
     };
-    run_worktree_command(&command)
+    run_worktree_command(&command)?;
+    record_worktree_lease(path)
+}
+
+fn run_wt(args: &[&str], path: &Path) {
+    let _ = std::process::Command::new("wt")
+        .args(args)
+        .current_dir(path)
+        .status();
+}
+
+fn record_worktree_lease(path: &Path) -> Result<(), String> {
+    let workspace = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("unknown");
+    let id = format!("herdr:{workspace}");
+    run_wt(
+        &[
+            "lease",
+            path.to_str().unwrap_or_default(),
+            "--kind",
+            "session",
+            "--id",
+            &id,
+            "--json",
+        ],
+        path,
+    );
+    Ok(())
+}
+
+pub(crate) fn beat_worktree_lease(path: &Path) {
+    run_wt(&["beat", path.to_str().unwrap_or_default()], path);
+}
+
+pub(crate) fn release_worktree_lease(path: &Path) {
+    run_wt(
+        &[
+            "release",
+            path.to_str().unwrap_or_default(),
+            "--kind",
+            "session",
+        ],
+        path,
+    );
 }
 
 pub(crate) fn run_worktree_command(command: &WorktreeCommand) -> Result<(), String> {
@@ -351,7 +396,10 @@ pub(crate) fn run_worktree_remove_command_with_recovery(
     trust_repository: bool,
 ) -> Result<(), String> {
     match run_worktree_command(command) {
-        Ok(()) => Ok(()),
+        Ok(()) => {
+            release_worktree_lease(path);
+            Ok(())
+        }
         Err(err) if force && is_not_working_tree_remove_error(&err) => {
             if worktree_list_contains_path(repo_root, path, trust_repository)? {
                 return Err(err);

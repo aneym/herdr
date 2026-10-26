@@ -2142,6 +2142,12 @@ impl App {
         if self.lookup_runtime_sender(ws_idx, pane_id).is_none() {
             return pane_not_found(id, &params.pane_id);
         }
+        if let Some(path) = self.state.workspaces[ws_idx]
+            .worktree_space()
+            .map(|space| space.checkout_path.clone())
+        {
+            crate::worktree::beat_worktree_lease(&path);
+        }
         match self.send_polite_bytes(
             ws_idx,
             pane_id,
