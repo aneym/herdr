@@ -135,6 +135,84 @@ fn ctl_drop_paths_result(result: serde_json::Value) -> Result<(), String> {
     control::deliver_result("drop_paths", result)
 }
 
+fn open_main_window(app: tauri::AppHandle, test_window: bool) {
+    for attempt in 1.. {
+        match build_main_window(&app, test_window) {
+            Ok(()) => return,
+            Err(error) => {
+                log_startup(&format!("main window attempt {attempt} failed: {error}"));
+                std::thread::sleep(std::time::Duration::from_secs(5));
+            }
+        }
+    }
+}
+
+fn build_main_window(app: &tauri::AppHandle, test_window: bool) -> Result<(), Box<dyn std::error::Error>> {
+    if app.get_webview_window("main").is_some() {
+        return Ok(());
+    }
+    let background = std::env::args().any(|a| a == "--background");
+    let control_motion = test_window
+        || std::env::var("HERDR_SHELL_CONTROL").as_deref() == Ok("1");
+    let mut config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|w| w.label == "main")
+        .ok_or("missing main window config")?
+        .clone();
+    if control_motion {
+        config.background_throttling = Some(tauri::utils::config::BackgroundThrottlingPolicy::Disabled);
+    }
+    let mut window = tauri::WebviewWindowBuilder::from_config(app, &config)?;
+    #[cfg(windows)]
+    {
+        if test_window {
+            window = window.data_directory(
+                app.path().app_local_data_dir()?.join("test-window-webview"),
+            );
+        }
+        if control_motion {
+            window = window.additional_browser_args("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows");
+        }
+    }
+    if test_window {
+        window = window
+            .initialization_script("window.__HERDR_TEST_WINDOW__ = true;")
+            .position(-20000.0, 0.0)
+            .skip_taskbar(true)
+            .focused(false);
+    } else if background {
+        window = window.focused(false);
+    }
+    window.build()?;
+    Ok(())
+}
+
+fn log_startup(message: &str) {
+    use std::io::Write;
+    let logged = (|| -> std::io::Result<()> {
+        let base = std::env::var_os("LOCALAPPDATA").ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "LOCALAPPDATA not set")
+        })?;
+        let logs = std::path::PathBuf::from(base).join("HerdrShell").join("logs");
+        std::fs::create_dir_all(&logs)?;
+        let mut log = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(logs.join("startup.log"))?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or_default();
+        writeln!(log, "{now} pid={} {message}", std::process::id())
+    })();
+    if let Err(log_error) = logged {
+        eprintln!("{message}; log: {log_error}");
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -190,52 +268,14 @@ fn main() {
             bridge::clipboard_write
         ])
         .setup(|app| {
-            let test_window = std::env::args().any(|a| a == "--test-window")
-                || std::env::var("HERDR_SHELL_TEST_WINDOW").as_deref() == Ok("1");
-            // Install relaunches open the window without taking focus from Alex.
-            let background = std::env::args().any(|a| a == "--background");
-            let control_motion = test_window
-                || std::env::var("HERDR_SHELL_CONTROL").as_deref() == Ok("1");
-            let mut config = app
-                .config()
-                .app
-                .windows
-                .iter()
-                .find(|w| w.label == "main")
-                .ok_or("missing main window config")?
-                .clone();
-            if control_motion {
-                config.background_throttling = Some(tauri::utils::config::BackgroundThrottlingPolicy::Disabled);
-            }
-            let mut window = tauri::WebviewWindowBuilder::from_config(app, &config)?;
-            // backgroundThrottling is unsupported by WebView2. Disable Chromium's
-            // background timer/renderer throttling so queued control hooks still run.
-            #[cfg(windows)]
-            {
-                if test_window {
-                    window = window.data_directory(
-                        app.path().app_local_data_dir()?.join("test-window-webview"),
-                    );
-                }
-                if control_motion {
-                    window = window.additional_browser_args("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows");
-                }
-            }
-            if test_window {
-                // The test window only observes terminals it did not make (testWindow.ts).
-                window = window
-                    .initialization_script("window.__HERDR_TEST_WINDOW__ = true;")
-                    .position(-20000.0, 0.0)
-                    .skip_taskbar(true)
-                    .focused(false);
-            } else if background {
-                window = window.focused(false);
-            }
             app.manage(bridge::Attaches::default());
             app.manage(files::Files::default());
             app.manage(machines::Machines::start(app.handle().clone())?);
+            let test_window = std::env::args().any(|a| a == "--test-window")
+                || std::env::var("HERDR_SHELL_TEST_WINDOW").as_deref() == Ok("1");
             control::start(app.handle().clone(), test_window);
-            window.build()?;
+            let handle = app.handle().clone();
+            std::thread::spawn(move || open_main_window(handle, test_window));
             Ok(())
         })
         .run(tauri::generate_context!())
