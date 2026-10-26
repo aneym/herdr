@@ -54,9 +54,10 @@ enum HomeRows {
         }
         for (state, title) in [("needs_you", "NEEDS YOU"), ("working", "WORKING"), ("finished", "FINISHED"), ("utility", "UTILITIES")] {
             let members = entities.filter { state == "utility" ? $0.1.class == "utility" : $0.1.class != "utility" && $0.1.state == state }
-            out.append(SpacesRow(id: "home-section:" + state, kind: .section, title: title, trailing: String(members.count)))
+            let current = members.filter { !$0.1.folded }
+            out.append(SpacesRow(id: "home-section:" + state, kind: .section, title: title, trailing: String(current.count)))
             let folded = state == "finished" ? members.filter { $0.1.folded } : []
-            append(members.filter { state != "finished" || !$0.1.folded }, key: state)
+            append(current, key: state)
             if !folded.isEmpty {
                 let open = chrome.expandedGroups.contains("home-earlier")
                 out.append(SpacesRow(id: "home-earlier", kind: .group, chevron: open ? "open" : "closed", title: "Earlier " + String(folded.count), toggleKey: "group:home-earlier"))
