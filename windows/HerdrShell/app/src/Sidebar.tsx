@@ -337,6 +337,7 @@ export default function Sidebar({ thoughts, navigation, snapshot = {}, catalog =
       {/* With goals, collapse-all lives on the goal row, as the Mac's; without, beside the mode switch. */}
       {collapseSpacesButton}
     </div>}
+    <h2 className="sidebar-section-title"><span>Spaces</span></h2>
     <section className="spaces">{groupSpaces(orderedSpaces.filter(r => !r.hidden), spaceGroups).map(({ group, spaces }) => <div key={group === null ? "rest:" : `group:${group}`}>{group && <div className="sidebar-row space-group-title" data-row={`spacegroup:${group}`}><span className="label">{group}</span></div>}{spaces.map(spaceRow)}</div>)}
     {rows.some(r => r.kind === "space" && r.hidden) && <><button className="sidebar-row muted" aria-expanded={hidden} onClick={() => setHidden(!hidden)}><span className="chevron"><Chevron open={hidden} /></span>Hidden</button>{(hidden || rows.some(r => r.hidden && r.id === renaming)) && orderedSpaces.filter(r => r.hidden).map(spaceRow)}</>}
     </section>
