@@ -47,14 +47,17 @@ def remote(cmd, input_data=None, stream=False, timeout=None):
     """Run cmd on the PC via ssh. Returns (rc, stdout) or streams output."""
     if stream:
         return subprocess.run(["ssh", "pc", cmd]).returncode, ""
-    p = subprocess.run(
-        ["ssh", "pc", cmd],
-        input=input_data,
-        capture_output=True,
-        text=isinstance(input_data, str) or input_data is None,
-        errors="replace",
-        timeout=timeout,
-    )
+    kwargs = {
+        "input": input_data,
+        "capture_output": True,
+        "timeout": timeout,
+    }
+    if isinstance(input_data, bytes):
+        kwargs["text"] = False
+    else:
+        kwargs["text"] = True
+        kwargs["errors"] = "replace"
+    p = subprocess.run(["ssh", "pc", cmd], **kwargs)
     out = p.stdout if isinstance(p.stdout, str) else (p.stdout or b"").decode("utf-8", "replace")
     if p.returncode != 0 and p.stderr:
         err = p.stderr if isinstance(p.stderr, str) else p.stderr.decode("utf-8", "replace")
