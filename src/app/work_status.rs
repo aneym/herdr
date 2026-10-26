@@ -102,7 +102,7 @@ impl App {
         self.factory_overlay = overlay;
         for ws_idx in 0..self.state.workspaces.len() {
             let workspace = self.workspace_info(ws_idx);
-            self.emit_event(crate::api::schema::EventEnvelope {
+            self.event_hub.push(crate::api::schema::EventEnvelope {
                 event: crate::api::schema::EventKind::WorkspaceUpdated,
                 data: crate::api::schema::EventData::WorkspaceUpdated { workspace },
             });
@@ -126,7 +126,7 @@ impl App {
         self.live_factory_tabs = live;
         for ws_idx in workspaces {
             let workspace = self.workspace_info(ws_idx);
-            self.emit_event(crate::api::schema::EventEnvelope {
+            self.event_hub.push(crate::api::schema::EventEnvelope {
                 event: crate::api::schema::EventKind::WorkspaceUpdated,
                 data: crate::api::schema::EventData::WorkspaceUpdated { workspace },
             });
