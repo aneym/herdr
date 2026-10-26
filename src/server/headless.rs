@@ -451,6 +451,14 @@ impl HeadlessServer {
                 continue;
             }
 
+            let now = Instant::now();
+            if self.handle_scheduled_tasks_headless(now, needs_render) {
+                needs_render = true;
+                needs_full_render = true;
+                needs_graphics_render = false;
+                crate::render_prof::event("full_render_cause.scheduled_tasks");
+            }
+
             // 1. Check the coalesced render signal from PTY readers and generic runtime work.
             if self.app.render_dirty.is_pending() {
                 needs_render = true;
@@ -499,14 +507,6 @@ impl HeadlessServer {
             note_server_signal(&self.should_quit, &self.server_event_tx);
             if self.should_quit.load(Ordering::Acquire) {
                 continue;
-            }
-
-            let now = Instant::now();
-            if self.handle_scheduled_tasks_headless(now, needs_render) {
-                needs_render = true;
-                needs_full_render = true;
-                needs_graphics_render = false;
-                crate::render_prof::event("full_render_cause.scheduled_tasks");
             }
 
             self.poll_pending_alt_screen_reads(now);
