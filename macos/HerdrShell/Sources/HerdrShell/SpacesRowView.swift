@@ -76,7 +76,7 @@ struct SpacesRowView: View {
             if let machine = row.badge { badge(machine) }
             Spacer(minLength: 4)
             if row.seats > 0 {
-                Text("\(row.seats) seats")
+                Text("\(row.seats) seat\(row.seats == 1 ? "" : "s")")
                     .font(.system(size: ShellType.sectionLabel))
                     .foregroundStyle(t.ink)
                     .padding(.horizontal, ShellSpace.step4)
