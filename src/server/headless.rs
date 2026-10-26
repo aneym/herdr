@@ -1058,14 +1058,25 @@ impl HeadlessServer {
     /// Drains server events from the dedicated channel.
     fn drain_server_events(&mut self) -> bool {
         let mut changed = false;
-        while {
+        let started = Instant::now();
+        for _ in 0..64 {
             note_server_signal(&self.should_quit, &self.server_event_tx);
-            !self.should_quit.load(Ordering::Acquire)
-        } {
+            if self.should_quit.load(Ordering::Acquire)
+                || started.elapsed() >= Duration::from_millis(2)
+            {
+                break;
+            }
             let Ok(ev) = self.server_event_rx.try_recv() else {
                 break;
             };
             changed |= self.handle_server_event_with_render_impact(ev) == RenderImpact::Full;
+        }
+        if started.elapsed() >= Duration::from_millis(200) {
+            info!(
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                pending = self.server_event_rx.len(),
+                "client event batch delayed server loop"
+            );
         }
         changed
     }
@@ -2972,7 +2983,6 @@ impl HeadlessServer {
         for _ in 0..16 {
             note_server_signal(&self.should_quit, &self.server_event_tx);
             if self.should_quit.load(Ordering::Acquire)
-                || !self.server_event_rx.is_empty()
                 || started.elapsed() >= Duration::from_millis(2)
             {
                 break;
@@ -3435,8 +3445,21 @@ impl HeadlessServer {
             self.next_factory_overlay_poll = Some(now + Duration::from_millis(200));
             let path = self.app.factory_ui.overlay_path();
             if self.factory_overlay_poller.poll(path.as_deref()).is_some() {
+                let loaded = SystemTime::now();
+                let write_age_ms = self
+                    .factory_overlay_poller
+                    .written()
+                    .and_then(|written| loaded.duration_since(written).ok())
+                    .map(|age| age.as_millis() as u64);
+                let applied = Instant::now();
                 self.app
                     .set_factory_overlay(self.factory_overlay_poller.current.clone());
+                info!(
+                    revision = self.factory_overlay_poller.revision,
+                    ?write_age_ms,
+                    emit_ms = applied.elapsed().as_millis() as u64,
+                    "factory overlay loaded and workspace updates emitted"
+                );
                 match crate::protocol::endpoint::factory_overlay_message(
                     &self.client_shell_boot_id,
                     self.factory_overlay_poller.revision,
