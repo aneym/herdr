@@ -911,10 +911,21 @@ final class FactoryModel: ObservableObject {
         }
     }
 
+    private static let agentLBKey: String? = {
+        let path = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".agent-rails/custody/agent-secret/agent-lb-key-herdr").path
+        guard let raw = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.hasPrefix("sk-clb-") ? value : nil
+    }()
+
     private func fetchPools() {
         if poolsTask != nil { return }
         guard let url = URL(string: sources.poolsURL) else { return }
-        let req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 4)
+        var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 4)
+        if let key = Self.agentLBKey {
+            req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        }
         let task = poolSession.dataTask(with: req) { [weak self] data, response, _ in
             let ok = (response as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } ?? false
             let parsed = ok ? data.flatMap { FactoryRead.pools($0) } : nil
